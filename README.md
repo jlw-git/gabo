@@ -114,8 +114,3 @@ Three layers are simulated (not live integrations) and disclosed only here:
 
 Everything else (fairness, routing geometry, POI search, map tiles, weather, venue filters, scoring, bucketing) is live.
 
-## See also
-
-- [Gabo_prd.md](Gabo_prd.md) — full product spec and design decisions
-- [SKILL.md](SKILL.md) — GrabMaps API reference used throughout
-- [AGENTS.md](AGENTS.md) — note to AI collaborators: Next.js 16 has breaking changes
