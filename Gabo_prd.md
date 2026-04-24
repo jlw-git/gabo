@@ -1,4 +1,4 @@
-# PRD — Fair & Fresh (codename "Gabo")
+# PRD — (codename "Gabo")
 **Date-Night Planner for the Household Planner**
 Owner: PM | Status: Hackathon v1 (2026-04-24) | Target: GrabMaps API Hackathon submission
 
