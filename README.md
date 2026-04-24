@@ -1,4 +1,4 @@
-# Gabo — Fair & Fresh
+# Gabo — Date Planner
 
 A 60-second date-night planner for dual-income Singapore households, built for the **GrabMaps API Hackathon**.
 
