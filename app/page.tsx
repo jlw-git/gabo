@@ -1,65 +1,177 @@
-import Image from "next/image";
+'use client'
+
+import { useEffect, useState } from 'react'
+import { PlanDateForm } from '@/components/PlanDateForm'
+import { ResultsView, type Buckets } from '@/components/ResultsView'
+import { OnboardingQuiz, type OnboardingResult } from '@/components/OnboardingQuiz'
+import type { PlaceSelection } from '@/components/PlaceSearchInput'
+import {
+  clearStoredProfile,
+  loadLastStarts,
+  loadStoredProfile,
+  saveLastStarts,
+  saveStoredProfile,
+  type StoredProfile,
+} from '@/lib/profile-storage'
+import type { LatLng } from '@/lib/planner/types'
+
+type Stage =
+  | { kind: 'onboarding' }
+  | { kind: 'form' }
+  | { kind: 'loading' }
+  | {
+      kind: 'results'
+      buckets: Buckets
+      scheduledFor: Date
+      overrideTags: string[]
+      startA: PlaceSelection
+      startB: PlaceSelection
+    }
+  | { kind: 'error'; message: string }
 
 export default function Home() {
+  const [hydrated, setHydrated] = useState(false)
+  const [stored, setStored] = useState<StoredProfile | null>(null)
+  const [lastStarts, setLastStarts] = useState<{ a: PlaceSelection | null; b: PlaceSelection | null }>({
+    a: null,
+    b: null,
+  })
+  const [stage, setStage] = useState<Stage>({ kind: 'form' })
+
+  useEffect(() => {
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      const profile = loadStoredProfile()
+      const starts = loadLastStarts()
+      setStored(profile)
+      setLastStarts({ a: starts?.start_a ?? null, b: starts?.start_b ?? null })
+      setStage(profile ? { kind: 'form' } : { kind: 'onboarding' })
+      setHydrated(true)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  function handleOnboardingComplete(result: OnboardingResult) {
+    saveStoredProfile(result.profile)
+    setStored({ profile: result.profile, saved_at: new Date().toISOString() })
+    setStage({ kind: 'form' })
+  }
+
+  function handleEditProfile() {
+    clearStoredProfile()
+    setStored(null)
+    setStage({ kind: 'onboarding' })
+  }
+
+  async function handlePlan(payload: {
+    start_a: LatLng
+    start_b: LatLng
+    scheduled_for: string
+    override_tags: string[]
+    startADetails: PlaceSelection
+    startBDetails: PlaceSelection
+  }) {
+    if (!stored) return
+    // Persist last-used start points so next visit pre-fills them.
+    saveLastStarts(payload.startADetails, payload.startBDetails)
+    setLastStarts({ a: payload.startADetails, b: payload.startBDetails })
+    setStage({ kind: 'loading' })
+    try {
+      const res = await fetch('/api/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start_a: payload.start_a,
+          start_b: payload.start_b,
+          scheduled_for: payload.scheduled_for,
+          override_tags: payload.override_tags,
+          profile: stored.profile,
+        }),
+      })
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '')
+        throw new Error(detail || `Request failed (${res.status})`)
+      }
+      const data = (await res.json()) as { buckets: Buckets }
+      setStage({
+        kind: 'results',
+        buckets: data.buckets ?? { safe: [], stretch: [], wild: [] },
+        scheduledFor: new Date(payload.scheduled_for),
+        overrideTags: payload.override_tags,
+        startA: payload.startADetails,
+        startB: payload.startBDetails,
+      })
+    } catch (err) {
+      setStage({ kind: 'error', message: err instanceof Error ? err.message : 'Unknown error' })
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <main className="gabo-bg flex min-h-screen w-full justify-center px-4 py-8">
+      <div className="flex w-full max-w-md flex-col">
+        {!hydrated && <SkeletonCard />}
+        {hydrated && stage.kind === 'onboarding' && (
+          <OnboardingQuiz onComplete={handleOnboardingComplete} />
+        )}
+        {hydrated && stage.kind === 'form' && stored && (
+          <PlanDateForm
+            onSubmit={handlePlan}
+            defaultStartA={lastStarts.a}
+            defaultStartB={lastStarts.b}
+            plannerName={stored.profile.planner_name}
+            partnerName={stored.profile.partner_name}
+            onEditProfile={handleEditProfile}
+          />
+        )}
+        {hydrated && stage.kind === 'loading' && <LoadingCard />}
+        {hydrated && stage.kind === 'results' && stored && (
+          <ResultsView
+            buckets={stage.buckets}
+            profile={stored.profile}
+            scheduledFor={stage.scheduledFor}
+            overrideTags={stage.overrideTags}
+            startA={stage.startA}
+            startB={stage.startB}
+            onBack={() => setStage({ kind: 'form' })}
+          />
+        )}
+        {hydrated && stage.kind === 'error' && (
+          <ErrorCard message={stage.message} onBack={() => setStage({ kind: 'form' })} />
+        )}
+      </div>
+    </main>
+  )
+}
+
+function SkeletonCard() {
+  return (
+    <div className="h-40 w-full animate-pulse rounded-2xl bg-white/70 ring-1 ring-stone-200" />
+  )
+}
+
+function LoadingCard() {
+  return (
+    <div className="flex flex-col items-center gap-4 rounded-2xl bg-white p-10 ring-1 ring-stone-200">
+      <div className="h-10 w-10 animate-spin rounded-full border-4 border-rose-200 border-t-rose-600" />
+      <p className="text-sm text-stone-600">Finding spots fair to both commutes…</p>
     </div>
-  );
+  )
+}
+
+function ErrorCard({ message, onBack }: { message: string; onBack: () => void }) {
+  return (
+    <div className="rounded-2xl bg-white p-6 ring-1 ring-rose-200">
+      <h2 className="mb-2 font-semibold text-rose-700">Something went wrong</h2>
+      <p className="mb-4 text-sm text-stone-600">{message}</p>
+      <button
+        onClick={onBack}
+        className="rounded-xl bg-stone-900 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-700"
+      >
+        Try again
+      </button>
+    </div>
+  )
 }

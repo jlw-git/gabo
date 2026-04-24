@@ -32,6 +32,13 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# MCP server config — contains bearer tokens; never commit
+.mcp.json
+
+# Claude Code per-user state; launch.json is committed but settings.local.json is not
+.claude/settings.local.json
 
 # vercel
 .vercel

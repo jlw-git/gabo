@@ -1,0 +1,17 @@
+{
+  "start_a": { "lat": 1.3181, "lng": 103.8924 },
+  "start_b": { "lat": 1.3329, "lng": 103.7436 },
+  "scheduled_for": "2026-04-25T19:30:00+08:00",
+  "override_tags": [],
+  "weather": "clear",
+  "profile": {
+    "planner_name": "Alex",
+    "partner_name": "Sam",
+    "cuisines_loved": ["japanese", "italian", "spanish", "french"],
+    "cuisines_avoided": [],
+    "dietary_hardstops": [],
+    "vibe_default": "cozy",
+    "budget_band": 3,
+    "transit_pref": "either"
+  }
+}

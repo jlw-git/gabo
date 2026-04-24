@@ -1,0 +1,38 @@
+
+I am participating in GrabMaps API Hackathon.
+
+
+Three Themes of the hackathon
+1. Intelligent Mobility
+Dynamic routing, ETA comparisons, and adaptive planners for city movement.
+2. Discover the City
+Hyperlocal discovery, curated maps, and social sharing of favourite spots.
+3.  Smarter Places
+Richer POI data and live activity visualisation for smarter businesses.
+
+
+My Problem statement:
+
+Time-strapped partners in dual-income households end up planning most of their household's date nights — and pay a real cost for it. A typical Singapore couple split across the island (one starting in the East, the other in the West, meeting somewhere in between) spends ~30 minutes per session juggling browser tabs and Google Maps to find something fresh, open, and fair on travel time. Most of the city's pop-ups and limited-run experiences slip past them. The fallback — a familiar restaurant near home — feels safe but uninspired, and over time signals less care than the planner actually intends.
+
+How might we (HMW) compress 30 minutes of fragmented date-night research into a 60-second decision — surfacing time-sensitive options that are open at the chosen time and fair to both partners' commutes?
+
+Why now: Singapore's F&B and events scene rewards early movers — pop-ups, limited-run concepts, and ticketed shows often sell out within days of opening. Couples without a real-time signal default to evergreen venues and miss the city's most distinctive moments.
+
+
+- Judging criteria of Hackathon
+  - Technical Merit: Quality of code, architecture, implementation
+  - Polish: UX, attention to detail, overall execution
+  - Execution: How well you delivered on your vision
+  - Wow Factor: How memorable and impressive your hack is
+
+Resources
+- There are GrabMaps API to work with.
+- I have API and MCP keys created.
+- There are Grab engineers around me to help me if needed to troubleshoot engineering or API issues
+
+
+Rules for Implementation: To ensure a secure and reliable integration, please call GrabMaps APIs via backend (proxy) instead of directly from the frontend, in order to achieve the following
+- Protect API Credentials: Keep keys hidden from client-side exposure.
+- Avoid Browser Limits: Bypass CORS and other browser-related restrictions.
+- Better Control: Where possible, manage usage, monitoring, and performance data.
