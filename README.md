@@ -1,6 +1,6 @@
-# Gabo — Fair & Fresh
+# Gabo 
 
-A 60-second date-night planner for dual-income Singapore households, built for the **GrabMaps API Hackathon**.
+A 60-second date-night planner for busy couples in Singapore
 
 Time-strapped planners spend ~30 minutes per date night juggling tabs to find places that are open, fresh, and fair to both commutes. Gabo compresses that into a single tap: a curated shortlist of venues and experiences where the ETA from each partner's starting point is close enough to feel fair — with pop-ups, new openings, and critic picks surfaced alongside the usual suspects.
 
