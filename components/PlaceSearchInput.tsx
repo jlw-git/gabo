@@ -124,9 +124,11 @@ export function PlaceSearchInput({ id, label, placeholder, value, onChange }: Pr
 
   return (
     <div ref={wrapperRef} className="relative">
-      <label htmlFor={id} className="mb-1 block text-xs font-medium uppercase tracking-wider text-stone-500">
-        {label}
-      </label>
+      {label && (
+        <label htmlFor={id} className="mb-1 block text-xs font-medium uppercase tracking-wider text-stone-500">
+          {label}
+        </label>
+      )}
       <input
         id={id}
         type="text"
@@ -137,7 +139,7 @@ export function PlaceSearchInput({ id, label, placeholder, value, onChange }: Pr
         onChange={handleChange}
         onFocus={() => setOpen(true)}
         onKeyDown={handleKeyDown}
-        className="w-full rounded-xl bg-white px-3 py-2.5 text-sm ring-1 ring-stone-200 focus:outline-none focus:ring-2 focus:ring-rose-300"
+        className="h-11 w-full rounded-xl bg-stone-50 px-3 text-sm ring-1 ring-stone-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-300"
       />
 
       {open && (loading || results.length > 0) && (

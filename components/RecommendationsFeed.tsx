@@ -108,20 +108,17 @@ export function RecommendationsFeed({ profile }: Props) {
 
   return (
     <div className="space-y-7">
-      <div className="flex items-end justify-between gap-3">
+      <div className="flex items-end justify-between gap-3 border-t border-stone-200 pt-7">
         <div className="space-y-1">
-          <p className="text-sm font-medium tracking-wide text-rose-600">Right now in Singapore</p>
-          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            What&rsquo;s on this week
-          </h2>
-          <p className="text-sm text-stone-500">
-            Tap any card for details, or plan around a specific time on the left.
+          <h2 className="text-lg font-semibold tracking-tight">Right now in Singapore</h2>
+          <p className="text-xs text-stone-500">
+            A quick taste of what&rsquo;s on. Use the planner above for a tailored shortlist.
           </p>
         </div>
       </div>
 
       {SECTIONS.map((section) => {
-        const cards = recs[section.key]
+        const cards = recs[section.key].slice(0, 3)
         if (cards.length === 0) return null
         return (
           <section key={section.key}>
@@ -132,7 +129,7 @@ export function RecommendationsFeed({ profile }: Props) {
                 <p className="text-xs text-stone-500">{section.subtitle}</p>
               </div>
             </div>
-            <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mx-0 md:grid md:snap-none md:grid-cols-2 md:overflow-visible md:px-0 xl:grid-cols-2">
+            <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mx-0 md:grid md:snap-none md:grid-cols-3 md:overflow-visible md:px-0">
               {cards.map((card) => (
                 <div
                   key={card.id}

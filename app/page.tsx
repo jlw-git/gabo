@@ -105,27 +105,31 @@ export default function Home() {
   }
 
   return (
-    <main className="gabo-bg flex min-h-screen w-full justify-center px-4 py-8 md:px-8 md:py-12">
-      <div className="flex w-full max-w-md flex-col md:max-w-4xl lg:max-w-6xl">
-        {!hydrated && <SkeletonCard />}
-        {hydrated && stage.kind === 'form' && stored && (
-          <div className="space-y-10 lg:grid lg:grid-cols-[400px_minmax(0,1fr)] lg:items-start lg:gap-10 lg:space-y-0">
-            <div className="mx-auto w-full max-w-md lg:mx-0 lg:sticky lg:top-12">
-              <PlanDateForm
-                onSubmit={handlePlan}
-                defaultStartA={lastStarts.a}
-                defaultStartB={lastStarts.b}
-                plannerName={stored.profile.planner_name}
-                partnerName={stored.profile.partner_name}
-              />
-            </div>
-            <div>
-              <RecommendationsFeed profile={stored.profile} />
-            </div>
-          </div>
-        )}
-        {hydrated && stage.kind === 'loading' && <LoadingCard />}
-        {hydrated && stage.kind === 'results' && stored && (
+    <main className="gabo-bg flex min-h-screen w-full flex-col items-center px-4 py-8 md:px-8 md:py-12">
+      {!hydrated && (
+        <div className="w-full max-w-md">
+          <SkeletonCard />
+        </div>
+      )}
+      {hydrated && stage.kind === 'form' && stored && (
+        <div className="flex w-full max-w-md flex-col gap-12 md:max-w-3xl lg:max-w-5xl lg:gap-16">
+          <PlanDateForm
+            onSubmit={handlePlan}
+            defaultStartA={lastStarts.a}
+            defaultStartB={lastStarts.b}
+            plannerName={stored.profile.planner_name}
+            partnerName={stored.profile.partner_name}
+          />
+          <RecommendationsFeed profile={stored.profile} />
+        </div>
+      )}
+      {hydrated && stage.kind === 'loading' && (
+        <div className="w-full max-w-md">
+          <LoadingCard />
+        </div>
+      )}
+      {hydrated && stage.kind === 'results' && stored && (
+        <div className="w-full max-w-md md:max-w-4xl lg:max-w-6xl">
           <ResultsView
             buckets={stage.buckets}
             profile={stored.profile}
@@ -135,11 +139,13 @@ export default function Home() {
             startB={stage.startB}
             onBack={() => setStage({ kind: 'form' })}
           />
-        )}
-        {hydrated && stage.kind === 'error' && (
+        </div>
+      )}
+      {hydrated && stage.kind === 'error' && (
+        <div className="w-full max-w-md">
           <ErrorCard message={stage.message} onBack={() => setStage({ kind: 'form' })} />
-        )}
-      </div>
+        </div>
+      )}
     </main>
   )
 }

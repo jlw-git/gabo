@@ -38,8 +38,8 @@ export function PlanDateForm({
   const [time, setTime] = useState(defaultDateTime())
   const [occasion, setOccasion] = useState<Override[]>([])
   const [customOccasion, setCustomOccasion] = useState('')
+  const [moreOpen, setMoreOpen] = useState(false)
 
-  // Locations are optional — only the time is required to submit.
   const canSubmit = !!time
 
   function toggle(tag: Override) {
@@ -61,104 +61,146 @@ export function PlanDateForm({
     })
   }
 
-  const namedSubtitle =
-    plannerName && partnerName
-      ? `Be ready with suggestions in no time, ${plannerName} & ${partnerName}.`
-      : 'Be ready with suggestions in no time.'
+  const youLabel = plannerName?.trim() ? `${plannerName}'s start` : "Your start"
+  const partnerLabel = partnerName?.trim() ? `${partnerName}'s start` : 'Their start'
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <header className="space-y-1">
-        <p className="text-sm font-medium tracking-wide text-rose-600">
-          Gabo — Your Date Planner
-        </p>
-        <h1 className="text-3xl font-semibold tracking-tight">
-          Short on time? Gabo has you covered.
+    <section className="space-y-8">
+      <header className="space-y-3 text-center">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-600">Gabo</p>
+        <h1 className="text-3xl font-semibold tracking-tight md:text-4xl lg:text-5xl">
+          When are you two heading out?
         </h1>
-        <p className="text-sm text-stone-500">{namedSubtitle}</p>
+        <p className="mx-auto max-w-xl text-sm text-stone-500 md:text-base">
+          Tell us when and where you&rsquo;re each starting from. We&rsquo;ll find date spots that work for both of you in 60 seconds.
+        </p>
       </header>
 
-      <div>
-        <label htmlFor="when" className="mb-1 block text-xs font-medium uppercase tracking-wider text-stone-500">
-          When
-        </label>
-        <input
-          id="when"
-          type="datetime-local"
-          value={time}
-          onChange={(e) => setTime(e.target.value)}
-          className="w-full rounded-xl bg-white px-3 py-2.5 text-sm ring-1 ring-stone-200 focus:outline-none focus:ring-2 focus:ring-rose-300"
-        />
-      </div>
+      <form
+        onSubmit={handleSubmit}
+        className="rounded-3xl bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)] ring-1 ring-stone-200 md:p-5"
+      >
+        <div className="grid gap-3 md:grid-cols-[minmax(180px,0.8fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end md:gap-2">
+          <Field label="When">
+            <input
+              id="when"
+              type="datetime-local"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              className="h-11 w-full rounded-xl bg-stone-50 px-3 text-sm ring-1 ring-stone-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-300"
+            />
+          </Field>
 
-      <div className="space-y-2">
-        <p className="text-xs font-medium uppercase tracking-wider text-stone-500">
-          Pickup spots <span className="font-normal normal-case text-stone-400">· optional · we’ll search islandwide if blank</span>
-        </p>
-        <div className="space-y-3">
-          <PlaceSearchInput
-            id="you-start"
-            label="Where you're starting"
-            placeholder="e.g. Home, Raffles Place, Paya Lebar"
-            value={youStart}
-            onChange={setYouStart}
-          />
-          <PlaceSearchInput
-            id="partner-start"
-            label="Where they're starting"
-            placeholder="e.g. Jurong East MRT, their office"
-            value={partnerStart}
-            onChange={setPartnerStart}
-          />
+          <Field label={youLabel} hint="Optional">
+            <PlaceSearchInput
+              id="you-start"
+              label=""
+              placeholder="e.g. Raffles Place"
+              value={youStart}
+              onChange={setYouStart}
+            />
+          </Field>
+
+          <Field label={partnerLabel} hint="Optional">
+            <PlaceSearchInput
+              id="partner-start"
+              label=""
+              placeholder="e.g. Jurong East MRT"
+              value={partnerStart}
+              onChange={setPartnerStart}
+            />
+          </Field>
+
+          <button
+            type="submit"
+            disabled={!canSubmit || disabled}
+            className="h-11 rounded-xl bg-stone-900 px-6 text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-stone-300 md:min-w-[120px]"
+          >
+            {disabled ? 'Finding…' : 'Plan it'}
+          </button>
         </div>
+
         {youStart && partnerStart && (
-          <p className="pt-1 text-xs text-stone-500">
-            We’ll favour spots that are roughly midway between you both.
+          <p className="mt-3 text-xs text-stone-500">
+            We&rsquo;ll favour spots roughly midway between you both.
           </p>
         )}
-      </div>
 
-      <div className="space-y-2">
-        <label className="block text-xs font-medium uppercase tracking-wider text-stone-500">
-          Special occasion <span className="font-normal normal-case text-stone-400">· optional</span>
-        </label>
-        <div className="flex flex-wrap gap-2">
-          {OCCASION_CHIPS.map((c) => {
-            const on = occasion.includes(c.tag)
-            return (
-              <button
-                type="button"
-                key={c.tag}
-                onClick={() => toggle(c.tag)}
-                className={`rounded-full px-3.5 py-1.5 text-sm font-medium ring-1 transition ${
-                  on
-                    ? 'bg-rose-600 text-white ring-rose-600'
-                    : 'bg-white text-stone-700 ring-stone-200 hover:bg-stone-50'
-                }`}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setMoreOpen((o) => !o)}
+            className="rounded-full px-2 py-1 text-xs font-medium text-stone-500 hover:text-stone-800"
+            aria-expanded={moreOpen}
+          >
+            {moreOpen ? 'Less options ▴' : 'Special occasion? ▾'}
+          </button>
+          {!moreOpen &&
+            occasion.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200"
               >
-                {c.label}
-              </button>
-            )
-          })}
+                {OCCASION_CHIPS.find((c) => c.tag === tag)?.label ?? tag}
+              </span>
+            ))}
         </div>
-        <input
-          type="text"
-          value={customOccasion}
-          onChange={(e) => setCustomOccasion(e.target.value)}
-          placeholder="Something else? e.g. proposal, reunion, first date"
-          maxLength={60}
-          className="w-full rounded-xl bg-white px-3 py-2.5 text-sm ring-1 ring-stone-200 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-rose-300"
-        />
-      </div>
 
-      <button
-        type="submit"
-        disabled={!canSubmit || disabled}
-        className="w-full rounded-2xl bg-rose-600 px-4 py-3.5 text-base font-semibold text-white shadow-sm transition hover:bg-rose-700 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-stone-300 disabled:shadow-none"
-      >
-        {disabled ? 'Finding spots…' : 'Search'}
-      </button>
-    </form>
+        {moreOpen && (
+          <div className="mt-3 space-y-2 border-t border-stone-100 pt-3">
+            <div className="flex flex-wrap gap-2">
+              {OCCASION_CHIPS.map((c) => {
+                const on = occasion.includes(c.tag)
+                return (
+                  <button
+                    type="button"
+                    key={c.tag}
+                    onClick={() => toggle(c.tag)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium ring-1 transition ${
+                      on
+                        ? 'bg-rose-50 text-rose-700 ring-rose-300'
+                        : 'bg-white text-stone-700 ring-stone-200 hover:bg-stone-50'
+                    }`}
+                  >
+                    {c.label}
+                  </button>
+                )
+              })}
+              <input
+                type="text"
+                value={customOccasion}
+                onChange={(e) => setCustomOccasion(e.target.value)}
+                placeholder="Something else? proposal, reunion, first date…"
+                maxLength={60}
+                className="min-w-[180px] flex-1 rounded-full bg-stone-50 px-3 py-1.5 text-xs ring-1 ring-stone-200 placeholder:text-stone-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-300"
+              />
+            </div>
+          </div>
+        )}
+      </form>
+    </section>
+  )
+}
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string
+  hint?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="space-y-1">
+      {label && (
+        <label className="flex items-baseline gap-1.5 text-[11px] font-medium uppercase tracking-wider text-stone-500">
+          <span>{label}</span>
+          {hint && <span className="text-[10px] font-normal normal-case tracking-normal text-stone-400">{hint}</span>}
+        </label>
+      )}
+      {children}
+    </div>
   )
 }
 
