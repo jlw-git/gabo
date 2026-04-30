@@ -106,11 +106,11 @@ export default function Home() {
 
   return (
     <main className="gabo-bg flex min-h-screen w-full justify-center px-4 py-8 md:px-8 md:py-12">
-      <div className="flex w-full max-w-md flex-col md:max-w-4xl">
+      <div className="flex w-full max-w-md flex-col md:max-w-4xl lg:max-w-6xl">
         {!hydrated && <SkeletonCard />}
         {hydrated && stage.kind === 'form' && stored && (
-          <div className="space-y-10">
-            <div className="mx-auto w-full max-w-md">
+          <div className="space-y-10 lg:grid lg:grid-cols-[400px_minmax(0,1fr)] lg:items-start lg:gap-10 lg:space-y-0">
+            <div className="mx-auto w-full max-w-md lg:mx-0 lg:sticky lg:top-12">
               <PlanDateForm
                 onSubmit={handlePlan}
                 defaultStartA={lastStarts.a}
@@ -119,7 +119,9 @@ export default function Home() {
                 partnerName={stored.profile.partner_name}
               />
             </div>
-            <RecommendationsFeed profile={stored.profile} />
+            <div>
+              <RecommendationsFeed profile={stored.profile} />
+            </div>
           </div>
         )}
         {hydrated && stage.kind === 'loading' && <LoadingCard />}
@@ -152,7 +154,7 @@ function LoadingCard() {
   return (
     <div className="flex flex-col items-center gap-4 rounded-2xl bg-white p-10 ring-1 ring-stone-200">
       <div className="h-10 w-10 animate-spin rounded-full border-4 border-rose-200 border-t-rose-600" />
-      <p className="text-sm text-stone-600">Searching dining and events…</p>
+      <p className="text-sm text-stone-600">Curating your night out…</p>
     </div>
   )
 }
@@ -160,7 +162,7 @@ function LoadingCard() {
 function ErrorCard({ message, onBack }: { message: string; onBack: () => void }) {
   return (
     <div className="rounded-2xl bg-white p-6 ring-1 ring-rose-200">
-      <h2 className="mb-2 font-semibold text-rose-700">Something went wrong</h2>
+      <h2 className="mb-2 font-semibold text-rose-700">That didn’t work</h2>
       <p className="mb-4 text-sm text-stone-600">{message}</p>
       <button
         onClick={onBack}

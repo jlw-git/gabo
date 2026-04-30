@@ -23,7 +23,7 @@ export function BookingOverlay({ card, scheduledFor, overrideTags, onConfirm, on
   const occasionLabel = known ? capitalize(known) : custom ? capitalize(custom) : null
 
   const title = event ? `Get tickets for ${card.name}` : `Reserve at ${card.name}`
-  const cta = event ? 'View on official site →' : 'Open on Chope →'
+  const cta = event ? 'Continue to event page →' : 'Continue to Chope →'
   const venueLabel = event ? 'Event' : 'Restaurant'
 
   return (

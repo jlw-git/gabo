@@ -22,19 +22,19 @@ const SECTIONS: { key: keyof Recommendations; title: string; subtitle: string; i
   {
     key: 'limited',
     title: 'Catch before it ends',
-    subtitle: 'Pop-ups closing in the next two weeks.',
+    subtitle: 'Pop-ups closing soon. See them while you can.',
     icon: '⏳',
   },
   {
     key: 'new',
     title: 'Just opened',
-    subtitle: 'Fresh on the scene — go before everyone else does.',
+    subtitle: 'Newly opened spots. Be among the first.',
     icon: '✨',
   },
   {
     key: 'trending',
     title: 'Trending this week',
-    subtitle: 'Buzzy spots and critic picks across the island.',
+    subtitle: 'What everyone’s talking about across the island.',
     icon: '🔥',
   },
 ]
@@ -112,7 +112,7 @@ export function RecommendationsFeed({ profile }: Props) {
         <div>
           <h2 className="text-lg font-semibold tracking-tight">This week in Singapore</h2>
           <p className="text-xs text-stone-500">
-            Tap a card to see details, or run a search above to plan around a specific time.
+            Tap any card for details. Or use the search to plan around a specific time.
           </p>
         </div>
       </div>
@@ -129,7 +129,7 @@ export function RecommendationsFeed({ profile }: Props) {
                 <p className="text-xs text-stone-500">{section.subtitle}</p>
               </div>
             </div>
-            <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mx-0 md:grid md:snap-none md:grid-cols-2 md:overflow-visible md:px-0 lg:grid-cols-3">
+            <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mx-0 md:grid md:snap-none md:grid-cols-2 md:overflow-visible md:px-0 xl:grid-cols-2">
               {cards.map((card) => (
                 <div
                   key={card.id}

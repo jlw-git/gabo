@@ -105,10 +105,10 @@ export function ResultsView({
     <div className="space-y-5">
       <header>
         <button onClick={onBack} className="text-sm text-stone-500 hover:text-stone-800">
-          ← Plan another
+          ← New search
         </button>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-          {totalCards === 0 ? 'No matches this time.' : 'Here’s what we found.'}
+          {totalCards === 0 ? 'Nothing fits this slot.' : 'Here’s what we found.'}
         </h1>
         <p className="text-sm text-stone-500">
           {scheduledFor.toLocaleString('en-SG', {
@@ -175,7 +175,7 @@ export function ResultsView({
       {totalCards === 0 && (
         <div className="rounded-2xl bg-white p-6 text-center ring-1 ring-stone-200">
           <p className="text-sm text-stone-600">
-            Nothing quite fits that time. Try a later hour or a different day.
+            Nothing’s open at that hour. Try a later time or another day.
           </p>
         </div>
       )}
@@ -278,15 +278,15 @@ function applyFilter(cards: PlanCardType[], filter: Filter, shortlist: Set<strin
 function emptyForFilter(tab: Tab, filter: Filter): string {
   if (filter === 'shortlist') {
     return tab === 'dining'
-      ? 'No dining places shortlisted yet — tap ☆ on a card to save it.'
-      : 'No events shortlisted yet — tap ☆ on a card to save it.'
+      ? 'Nothing saved yet. Tap ☆ on any card to keep it here.'
+      : 'Nothing saved yet. Tap ☆ on any card to keep it here.'
   }
-  if (filter === 'limited') return 'No limited-run picks in this category.'
-  if (filter === 'new') return 'No newly opened picks in this category.'
-  if (filter === 'recommended') return 'No critic / award picks in this category.'
+  if (filter === 'limited') return 'No limited-run picks here right now.'
+  if (filter === 'new') return 'No just-opened picks here right now.'
+  if (filter === 'recommended') return 'No critic or award picks here right now.'
   return tab === 'dining'
-    ? 'No dining matches for this time. Try the Events tab or shift the time.'
-    : 'No events on for this slot. Try the Dining tab or pick another evening.'
+    ? 'No dining options at this time. Try the Events tab, or pick another slot.'
+    : 'No events at this time. Try the Dining tab, or pick another evening.'
 }
 
 function CategoryTabs({

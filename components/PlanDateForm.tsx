@@ -63,14 +63,18 @@ export function PlanDateForm({
 
   const namedSubtitle =
     plannerName && partnerName
-      ? `Tonight in Singapore — tailored for ${plannerName} & ${partnerName}.`
-      : 'Tonight in Singapore — tailored for both of you.'
+      ? `Be ready with suggestions in no time, ${plannerName} & ${partnerName}.`
+      : 'Be ready with suggestions in no time.'
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <header className="space-y-1">
-        <p className="text-sm font-medium tracking-wide text-rose-600">Gabo</p>
-        <h1 className="text-3xl font-semibold tracking-tight">Plan a date night in Singapore.</h1>
+        <p className="text-sm font-medium tracking-wide text-rose-600">
+          Gabo — Your Date Planner
+        </p>
+        <h1 className="text-3xl font-semibold tracking-tight">
+          Short on time? Gabo has you covered.
+        </h1>
         <p className="text-sm text-stone-500">{namedSubtitle}</p>
       </header>
 
@@ -89,19 +93,19 @@ export function PlanDateForm({
 
       <div className="space-y-2">
         <p className="text-xs font-medium uppercase tracking-wider text-stone-500">
-          Starting points <span className="font-normal normal-case text-stone-400">· optional · we’ll go islandwide if blank</span>
+          Pickup spots <span className="font-normal normal-case text-stone-400">· optional · we’ll search islandwide if blank</span>
         </p>
         <div className="space-y-3">
           <PlaceSearchInput
             id="you-start"
-            label="Your start"
+            label="Where you're starting"
             placeholder="e.g. Home, Raffles Place, Paya Lebar"
             value={youStart}
             onChange={setYouStart}
           />
           <PlaceSearchInput
             id="partner-start"
-            label="Your partner's start"
+            label="Where they're starting"
             placeholder="e.g. Jurong East MRT, their office"
             value={partnerStart}
             onChange={setPartnerStart}
@@ -109,7 +113,7 @@ export function PlanDateForm({
         </div>
         {youStart && partnerStart && (
           <p className="pt-1 text-xs text-stone-500">
-            We’ll lean toward spots that are roughly midway between you both.
+            We’ll favour spots that are roughly midway between you both.
           </p>
         )}
       </div>

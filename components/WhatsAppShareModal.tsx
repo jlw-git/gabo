@@ -40,12 +40,12 @@ export function WhatsAppShareModal({ card, profile, scheduledFor, onClose }: Pro
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Send to {partnerLabel}</h2>
+          <h2 className="text-lg font-semibold">Share with {partnerLabel}</h2>
           <button onClick={onClose} className="text-stone-400 hover:text-stone-600" aria-label="Close">
             ✕
           </button>
         </div>
-        <p className="mb-4 text-sm text-stone-500">Edit the message below, then copy.</p>
+        <p className="mb-4 text-sm text-stone-500">Tweak the note, then copy and paste.</p>
 
         <label htmlFor="share-text" className="sr-only">
           Message
@@ -62,7 +62,7 @@ export function WhatsAppShareModal({ card, profile, scheduledFor, onClose }: Pro
           onClick={copyText}
           className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3.5 text-base font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99]"
         >
-          {copied ? '✓ Copied' : 'Copy'}
+          {copied ? '✓ Copied to clipboard' : 'Copy message'}
         </button>
       </div>
     </div>

@@ -201,7 +201,7 @@ export function VenueDetailModal({
           )}
 
           {crossRecs.length > 0 && onSelectCrossRec && (
-            <Section title={event ? 'Dine before this' : 'After your meal'}>
+            <Section title={event ? 'Eat before you go' : 'Plan something after'}>
               <div className="space-y-2">
                 {crossRecs.map(({ c, km }) => (
                   <button
