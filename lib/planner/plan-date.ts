@@ -2,15 +2,22 @@ import { mapWithConcurrency } from '@/lib/async/pool'
 import { fetchDirection, type DirectionResult } from '@/lib/grabmaps/direction'
 import { isOpenAt } from '@/lib/planner/hours'
 import type { PlanRequest } from '@/lib/planner/request-validation'
-import { bucketCards, prescore, scoreWithETAs } from '@/lib/planner/score'
+import {
+  bucketByCategory,
+  prescore,
+  scoreWithETAs,
+  scoreWithSingleEta,
+  scoreWithoutEtas,
+} from '@/lib/planner/score'
 import type { LatLng, Profile, Venue } from '@/lib/planner/types'
 import { createClient } from '@/lib/supabase/server'
 import { catalog } from '@/lib/venues/catalog'
 import { fetchWeatherCondition, type WeatherResult } from '@/lib/weather'
 
 // Cap on how many candidates we route after hard-filtering. Each survivor
-// costs 2 GrabMaps Direction calls (one per start point). 20 × 2 = 40 calls.
-const ROUTING_CANDIDATE_CAP = 20
+// costs up to 2 GrabMaps Direction calls. Sized generously since with two
+// categories (dining + events) we want depth in both.
+const ROUTING_CANDIDATE_CAP = 24
 const ROUTING_CONCURRENCY = 5
 
 type VenueSource = 'supabase' | 'catalog' | 'catalog-fallback'
@@ -59,37 +66,58 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
   if (topByPrescore.length === 0) {
     return {
       buckets: emptyBuckets(),
-      meta: {
-        ...emptyMeta(source, venues.length),
-        fallback_reason,
-      },
+      meta: { ...emptyMeta(source, venues.length), fallback_reason },
     }
   }
 
-  if (!hasRoutingApiKey()) {
+  const startA = request.start_a
+  const startB = request.start_b
+  const needsRouting = Boolean(startA || startB)
+
+  if (needsRouting && !hasRoutingApiKey()) {
     throw new PlanDateError('GRABMAPS_API_KEY missing', 500)
   }
 
   let cachedLegs = 0
+
   const routed = await mapWithConcurrency(topByPrescore, ROUTING_CONCURRENCY, async (venue) => {
     try {
-      const [a, b] = await Promise.all([
-        getDirection(request.start_a, { lat: venue.lat, lng: venue.lng }),
-        getDirection(request.start_b, { lat: venue.lat, lng: venue.lng }),
-      ])
-      if (a.cached) cachedLegs++
-      if (b.cached) cachedLegs++
-      const drivingA = Math.round(a.duration_sec / 60)
-      const drivingB = Math.round(b.duration_sec / 60)
-      return scoreWithETAs(venue, request.profile, drivingA, drivingB, request.override_tags)
+      if (startA && startB) {
+        const [a, b] = await Promise.all([
+          getDirection(startA, { lat: venue.lat, lng: venue.lng }),
+          getDirection(startB, { lat: venue.lat, lng: venue.lng }),
+        ])
+        if (a.cached) cachedLegs++
+        if (b.cached) cachedLegs++
+        return scoreWithETAs(
+          venue,
+          request.profile,
+          Math.round(a.duration_sec / 60),
+          Math.round(b.duration_sec / 60),
+          request.override_tags
+        )
+      }
+      if (startA || startB) {
+        const start = (startA ?? startB) as LatLng
+        const a = await getDirection(start, { lat: venue.lat, lng: venue.lng })
+        if (a.cached) cachedLegs++
+        return scoreWithSingleEta(
+          venue,
+          request.profile,
+          Math.round(a.duration_sec / 60),
+          request.override_tags
+        )
+      }
+      // No start points — islandwide search.
+      return scoreWithoutEtas(venue, request.profile, request.override_tags)
     } catch {
       return null
     }
   })
 
   const ranked = routed.filter((r): r is NonNullable<typeof r> => r !== null)
-  const buckets = bucketCards(ranked)
-  const totalCards = buckets.safe.length + buckets.stretch.length + buckets.wild.length
+  const buckets = bucketByCategory(ranked)
+  const totalCards = buckets.dining.length + buckets.events.length
 
   return {
     buckets,
@@ -102,8 +130,9 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
       candidate_cap: ROUTING_CANDIDATE_CAP,
       routing_concurrency: ROUTING_CONCURRENCY,
       cached_legs: cachedLegs,
-      total_legs: ranked.length * 2,
+      total_legs: needsRouting ? ranked.length * (startA && startB ? 2 : 1) : 0,
       total_cards: totalCards,
+      starts_provided: (startA ? 1 : 0) + (startB ? 1 : 0),
       weather,
     },
   }
@@ -113,7 +142,6 @@ async function loadVenuesWithFallback(profile: Profile, overrides: string[]): Pr
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
     return { venues: filterInMemory(catalog, profile, overrides), source: 'catalog' }
   }
-
   try {
     return { venues: await loadFromSupabase(profile, overrides), source: 'supabase' }
   } catch (err) {
@@ -129,18 +157,15 @@ async function loadVenuesWithFallback(profile: Profile, overrides: string[]): Pr
 async function loadFromSupabase(profile: Profile, overrides: string[]): Promise<Venue[]> {
   const supabase = await createClient()
   let query = supabase.from('venues').select('*').eq('active', true)
-
   if (profile.budget_bands && profile.budget_bands.length > 0) {
     query = query.in('budget_band', profile.budget_bands)
   }
-
   if (profile.dietary_hardstops.length > 0) {
     query = query.contains('dietary_flags', profile.dietary_hardstops)
   }
   if (overrides.includes('vegetarian')) {
     query = query.contains('dietary_flags', ['vegetarian_friendly'])
   }
-
   const { data, error } = await query
   if (error) throw new Error(`supabase: ${error.message}`)
   return (data ?? []) as Venue[]
@@ -169,7 +194,11 @@ function filterInMemory(all: Venue[], profile: Profile, overrides: string[]): Ve
       : null
   return all.filter((venue) => {
     if (!venue.active) return false
-    if (budgetsAllowed && !budgetsAllowed.has(venue.budget_band)) return false
+    // Budget filter applies to dining only; experiences span budget_bands and
+    // shouldn't be excluded just because the user picked $$ for restaurants.
+    if (budgetsAllowed && !budgetsAllowed.has(venue.budget_band) && !venue.cuisine_tags.includes('experience')) {
+      return false
+    }
     if (!profile.dietary_hardstops.every((d) => venue.dietary_flags.includes(d))) return false
     if (overrides.includes('vegetarian') && !venue.dietary_flags.includes('vegetarian_friendly')) {
       return false
@@ -189,5 +218,5 @@ function emptyMeta(source: VenueSource, total: number) {
 }
 
 function emptyBuckets() {
-  return { safe: [], stretch: [], wild: [] }
+  return { dining: [], events: [] }
 }

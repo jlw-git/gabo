@@ -10,26 +10,26 @@ import type { PlaceSelection } from './PlaceSearchInput'
 
 type Props = {
   buckets: Buckets
-  startA: PlaceSelection
-  startB: PlaceSelection
+  startA: PlaceSelection | null
+  startB: PlaceSelection | null
   plannerLabel: string
   partnerLabel: string
   mode: TransitMode
   onSelect: (card: PlanCardType) => void
 }
 
-const BUCKET_COLOR: Record<keyof Buckets, string> = {
-  safe: '#10b981', // emerald-500
-  stretch: '#f59e0b', // amber-500
-  wild: '#e11d48', // rose-600
+const CATEGORY_COLOR: Record<'dining' | 'event', string> = {
+  dining: '#e11d48', // rose-600
+  event: '#7c3aed', // violet-600
 }
 
 const START_A_COLOR = '#0f766e'
 const START_B_COLOR = '#b45309'
+const SG_CENTER: [number, number] = [103.8198, 1.3521]
 
-// Birds-eye view of the 9 plan cards. Pins color-coded by bucket so fairness +
-// freshness land geographically at a glance. Tapping a pin opens the same
-// VenueDetailModal flow as the list view.
+// Birds-eye map view. Pins color-coded by category (dining vs event). With
+// start points provided, the map fits to include them; without, it centres on
+// Singapore. Tap a pin → detail modal.
 export function OverviewMap({
   buckets,
   startA,
@@ -51,8 +51,6 @@ export function OverviewMap({
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: 'https://maps.grab.com/api/style.json',
-      // Tile fetches happen in a Web Worker with no base URL, so return an
-      // absolute URL (not a relative path) from transformRequest.
       transformRequest: (url) => {
         if (url.startsWith('https://maps.grab.com/')) {
           const proxied = new URL(
@@ -63,7 +61,7 @@ export function OverviewMap({
         }
         return { url }
       },
-      center: [103.8198, 1.3521],
+      center: SG_CENTER,
       zoom: 11,
       attributionControl: false,
       dragRotate: false,
@@ -76,57 +74,69 @@ export function OverviewMap({
       setError(msg)
     })
 
-    // Start-point pins
-    new maplibregl.Marker({ element: dotElement(START_A_COLOR, 'A'), anchor: 'bottom' })
-      .setLngLat([startA.lng, startA.lat])
-      .setPopup(new maplibregl.Popup({ offset: 14, closeButton: false }).setText(`${plannerLabel} · ${startA.label}`))
-      .addTo(map)
-    new maplibregl.Marker({ element: dotElement(START_B_COLOR, 'B'), anchor: 'bottom' })
-      .setLngLat([startB.lng, startB.lat])
-      .setPopup(new maplibregl.Popup({ offset: 14, closeButton: false }).setText(`${partnerLabel} · ${startB.label}`))
-      .addTo(map)
+    // Start-point pins (only when provided).
+    if (startA) {
+      new maplibregl.Marker({ element: dotElement(START_A_COLOR, 'A'), anchor: 'bottom' })
+        .setLngLat([startA.lng, startA.lat])
+        .setPopup(new maplibregl.Popup({ offset: 14, closeButton: false }).setText(`${plannerLabel} · ${startA.label}`))
+        .addTo(map)
+    }
+    if (startB) {
+      new maplibregl.Marker({ element: dotElement(START_B_COLOR, 'B'), anchor: 'bottom' })
+        .setLngLat([startB.lng, startB.lat])
+        .setPopup(new maplibregl.Popup({ offset: 14, closeButton: false }).setText(`${partnerLabel} · ${startB.label}`))
+        .addTo(map)
+    }
 
-    // Venue pins, color-coded by bucket.
-    const allCards: { card: PlanCardType; bucket: keyof Buckets }[] = [
-      ...buckets.safe.map((c) => ({ card: c, bucket: 'safe' as const })),
-      ...buckets.stretch.map((c) => ({ card: c, bucket: 'stretch' as const })),
-      ...buckets.wild.map((c) => ({ card: c, bucket: 'wild' as const })),
+    // Venue pins coloured by category.
+    const allCards: { card: PlanCardType; category: 'dining' | 'event' }[] = [
+      ...buckets.dining.map((c) => ({ card: c, category: 'dining' as const })),
+      ...buckets.events.map((c) => ({ card: c, category: 'event' as const })),
     ]
 
-    for (const { card, bucket } of allCards) {
-      const el = venueElement(BUCKET_COLOR[bucket])
+    for (const { card, category } of allCards) {
+      const el = venueElement(CATEGORY_COLOR[category])
       el.addEventListener('click', (ev) => {
         ev.stopPropagation()
         onSelect(card)
       })
-      const etaADisplay = displayEta(card.eta_a_min)
-      const etaBDisplay = displayEta(card.eta_b_min)
+      const showEtas = card.eta_a_min > 0 || card.eta_b_min > 0
+      const etaLine = showEtas
+        ? `<div style="font-size:11px;color:#57534e;margin-top:2px">${modeIcon} ${displayEta(card.eta_a_min)}m${
+            card.eta_b_min !== card.eta_a_min ? ` · ${displayEta(card.eta_b_min)}m` : ''
+          }</div>`
+        : ''
       new maplibregl.Marker({ element: el, anchor: 'bottom' })
         .setLngLat([card.lng, card.lat])
         .setPopup(
           new maplibregl.Popup({ offset: 16, closeButton: false }).setHTML(
-            `<div style="font-weight:600">${escapeHtml(card.name)}</div>` +
-              `<div style="font-size:11px;color:#57534e;margin-top:2px">${modeIcon} ${etaADisplay}m · ${etaBDisplay}m</div>`
+            `<div style="font-weight:600">${escapeHtml(card.name)}</div>${etaLine}`
           )
         )
         .addTo(map)
     }
 
-    // Fit bounds to include all 11 points (2 starts + up to 9 venues).
-    const bounds = new maplibregl.LngLatBounds([startA.lng, startA.lat], [startA.lng, startA.lat])
-    bounds.extend([startB.lng, startB.lat])
-    for (const { card } of allCards) bounds.extend([card.lng, card.lat])
-    map.fitBounds(bounds, { padding: 72, duration: 0, maxZoom: 14 })
+    // Fit bounds to whatever points we have. With no points, leave the map
+    // centred on Singapore at zoom 11.
+    const points: [number, number][] = []
+    if (startA) points.push([startA.lng, startA.lat])
+    if (startB) points.push([startB.lng, startB.lat])
+    for (const { card } of allCards) points.push([card.lng, card.lat])
+    if (points.length >= 2) {
+      const bounds = new maplibregl.LngLatBounds(points[0], points[0])
+      for (const p of points) bounds.extend(p)
+      map.fitBounds(bounds, { padding: 72, duration: 0, maxZoom: 14 })
+    } else if (points.length === 1) {
+      map.setCenter(points[0])
+      map.setZoom(13)
+    }
 
     return () => {
       map.remove()
       mapRef.current = null
     }
-    // We intentionally re-init on any of these changes; re-mounting the map is
-    // simpler than diffing pin sets for this count. Mode included so popups
-    // re-render with the current transit mode.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buckets.safe, buckets.stretch, buckets.wild, startA.lat, startA.lng, startB.lat, startB.lng, mode])
+  }, [buckets.dining, buckets.events, startA?.lat, startA?.lng, startB?.lat, startB?.lng, mode])
 
   return (
     <div className="relative h-[65vh] w-full overflow-hidden rounded-2xl ring-1 ring-stone-200">
@@ -137,9 +147,8 @@ export function OverviewMap({
         </div>
       )}
       <div className="pointer-events-none absolute left-3 top-3 flex flex-col gap-1 rounded-xl bg-white/90 px-3 py-2 text-[11px] font-medium text-stone-700 shadow-sm backdrop-blur">
-        <LegendRow color={BUCKET_COLOR.safe} label="Easy yes" />
-        <LegendRow color={BUCKET_COLOR.stretch} label="A small detour" />
-        <LegendRow color={BUCKET_COLOR.wild} label="Worth the leap" />
+        <LegendRow color={CATEGORY_COLOR.dining} label="Dining" />
+        <LegendRow color={CATEGORY_COLOR.event} label="Events" />
       </div>
       <div className="pointer-events-none absolute bottom-1.5 right-2 rounded bg-white/80 px-1.5 py-0.5 text-[9px] font-medium text-stone-500 backdrop-blur">
         GrabMaps
@@ -161,8 +170,8 @@ function LegendRow({ color, label }: { color: string; label: string }) {
 }
 
 function venueElement(color: string): HTMLDivElement {
-  // Wrapper is positioned by MapLibre (translate). Inner dot handles the hover
-  // scale so we never clobber MapLibre's transform.
+  // Wrapper positioned by MapLibre; inner dot handles hover scale so we never
+  // clobber MapLibre's translate transform.
   const wrapper = document.createElement('div')
   wrapper.style.cssText = 'width:22px;height:22px;cursor:pointer'
 

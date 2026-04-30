@@ -1,11 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type {
   PlanCard as PlanCardType,
   Profile,
   TransitMode,
 } from '@/lib/planner/types'
+import { loadShortlist, saveShortlist } from '@/lib/shortlist-storage'
 import type { PlaceSelection } from './PlaceSearchInput'
 import { PlanCard } from './PlanCard'
 import { BookingOverlay } from './BookingOverlay'
@@ -14,9 +15,8 @@ import { VenueDetailModal } from './VenueDetailModal'
 import { OverviewMap } from './OverviewMap'
 
 export type Buckets = {
-  safe: PlanCardType[]
-  stretch: PlanCardType[]
-  wild: PlanCardType[]
+  dining: PlanCardType[]
+  events: PlanCardType[]
 }
 
 type Props = {
@@ -24,45 +24,25 @@ type Props = {
   profile: Profile
   scheduledFor: Date
   overrideTags: string[]
-  startA: PlaceSelection
-  startB: PlaceSelection
+  startA: PlaceSelection | null
+  startB: PlaceSelection | null
   onBack: () => void
 }
 
-type Section = {
-  key: keyof Buckets
-  eyebrow: string
-  title: string
-  subtitle: string
-  dot: string // tailwind bg-* for the accent dot
-  eyebrowTone: string // tailwind text-* for the eyebrow
-}
+type Tab = 'dining' | 'events'
+type Filter = 'all' | 'recommended' | 'limited' | 'new' | 'shortlist'
 
-const SECTIONS: Section[] = [
-  {
-    key: 'safe',
-    eyebrow: 'EASY',
-    title: 'Easy yes',
-    subtitle: 'Familiar ground — you know what you’re getting.',
-    dot: 'bg-emerald-500',
-    eyebrowTone: 'text-emerald-700',
-  },
-  {
-    key: 'stretch',
-    eyebrow: 'STRETCH',
-    title: 'A small detour',
-    subtitle: 'Nudges your usual, stays within reach.',
-    dot: 'bg-amber-500',
-    eyebrowTone: 'text-amber-700',
-  },
-  {
-    key: 'wild',
-    eyebrow: 'WILD',
-    title: 'Worth the leap',
-    subtitle: 'Fresh, buzzy, or limited-run.',
-    dot: 'bg-rose-500',
-    eyebrowTone: 'text-rose-700',
-  },
+const TABS: { key: Tab; label: string; icon: string }[] = [
+  { key: 'dining', label: 'Dining', icon: '🍽️' },
+  { key: 'events', label: 'Events', icon: '🎟️' },
+]
+
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'recommended', label: 'Recommended' },
+  { key: 'limited', label: 'Limited-run' },
+  { key: 'new', label: 'Just opened' },
+  { key: 'shortlist', label: '★ Shortlist' },
 ]
 
 export function ResultsView({
@@ -78,12 +58,35 @@ export function ResultsView({
   const [shared, setShared] = useState<PlanCardType | null>(null)
   const [details, setDetails] = useState<PlanCardType | null>(null)
   const [view, setView] = useState<'list' | 'map'>('list')
+  const [tab, setTab] = useState<Tab>('dining')
+  const [filter, setFilter] = useState<Filter>('all')
+  const [shortlist, setShortlist] = useState<Set<string>>(new Set())
+
+  // Hydrate shortlist from localStorage once on mount.
+  useEffect(() => {
+    setShortlist(new Set(loadShortlist()))
+  }, [])
+
+  function toggleShortlist(card: PlanCardType) {
+    setShortlist((prev) => {
+      const next = new Set(prev)
+      if (next.has(card.id)) next.delete(card.id)
+      else next.add(card.id)
+      saveShortlist([...next])
+      return next
+    })
+  }
 
   const defaultMode: TransitMode =
     profile.transit_pref === 'mrt' ? 'transit' : 'drive'
-  const totalCards = buckets.safe.length + buckets.stretch.length + buckets.wild.length
+  const totalCards = buckets.dining.length + buckets.events.length
   const plannerLabel = profile.planner_name?.trim() || 'You'
   const partnerLabel = profile.partner_name?.trim() || 'Partner'
+
+  const allCards = useMemo(
+    () => [...buckets.dining, ...buckets.events],
+    [buckets.dining, buckets.events]
+  )
 
   function confirmBooking(card: PlanCardType) {
     setBooking(null)
@@ -91,21 +94,21 @@ export function ResultsView({
     if (card.chope_url) window.open(card.chope_url, '_blank', 'noopener,noreferrer')
   }
 
-  // If it's a celebratory occasion, lead with the Wild section.
-  const celebratory =
-    overrideTags.includes('anniversary') || overrideTags.includes('birthday')
-  const orderedSections = celebratory
-    ? [SECTIONS.find((s) => s.key === 'wild')!, ...SECTIONS.filter((s) => s.key !== 'wild')]
-    : SECTIONS
+  const tabCards = tab === 'dining' ? buckets.dining : buckets.events
+  const activeCards = useMemo(() => applyFilter(tabCards, filter, shortlist), [tabCards, filter, shortlist])
+  const shortlistCount = useMemo(
+    () => allCards.filter((c) => shortlist.has(c.id)).length,
+    [allCards, shortlist]
+  )
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <header>
         <button onClick={onBack} className="text-sm text-stone-500 hover:text-stone-800">
           ← Plan another
         </button>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-          {totalCards === 0 ? 'No matches this time.' : 'Pick a few to share.'}
+          {totalCards === 0 ? 'No matches this time.' : 'Here’s what we found.'}
         </h1>
         <p className="text-sm text-stone-500">
           {scheduledFor.toLocaleString('en-SG', {
@@ -116,24 +119,63 @@ export function ResultsView({
             minute: '2-digit',
             hour12: true,
           })}
+          {startA && startB && ' · midway between you both'}
+          {!startA && !startB && ' · islandwide'}
         </p>
       </header>
 
       {totalCards > 0 && (
-        <div
-          className="inline-flex self-start rounded-full bg-stone-100 p-1 ring-1 ring-stone-200"
-          role="tablist"
-          aria-label="Results view"
-        >
-          <ViewTab active={view === 'list'} onClick={() => setView('list')} label="List" />
-          <ViewTab active={view === 'map'} onClick={() => setView('map')} label="Map" />
-        </div>
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CategoryTabs
+              active={tab}
+              onChange={setTab}
+              counts={{ dining: buckets.dining.length, events: buckets.events.length }}
+            />
+            <div
+              className="inline-flex rounded-full bg-stone-100 p-1 ring-1 ring-stone-200"
+              role="tablist"
+              aria-label="Results view"
+            >
+              <ViewTab active={view === 'list'} onClick={() => setView('list')} label="List" />
+              <ViewTab active={view === 'map'} onClick={() => setView('map')} label="Map" />
+            </div>
+          </div>
+
+          {view === 'list' && (
+            <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {FILTERS.map((f) => {
+                const on = f.key === filter
+                const showCount = f.key === 'shortlist' && shortlistCount > 0
+                return (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => setFilter(f.key)}
+                    className={`flex-shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+                      on
+                        ? 'bg-stone-900 text-white ring-stone-900'
+                        : 'bg-white text-stone-700 ring-stone-200 hover:bg-stone-50'
+                    }`}
+                  >
+                    {f.label}
+                    {showCount && (
+                      <span className={`ml-1.5 rounded-full px-1.5 text-[10px] ${on ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-700'}`}>
+                        {shortlistCount}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </>
       )}
 
       {totalCards === 0 && (
         <div className="rounded-2xl bg-white p-6 text-center ring-1 ring-stone-200">
           <p className="text-sm text-stone-600">
-            Nothing quite fits that time. Try a later hour, a different day, or remove an occasion tag.
+            Nothing quite fits that time. Try a later hour or a different day.
           </p>
         </div>
       )}
@@ -151,53 +193,30 @@ export function ResultsView({
       )}
 
       {totalCards > 0 && view === 'list' && (
-        <div className="space-y-10">
-          {orderedSections.map((section) => {
-          const cards = buckets[section.key]
-          return (
-            <section key={section.key}>
-              <div className="mb-3 flex items-stretch gap-3">
-                <span
-                  className={`w-1 flex-shrink-0 rounded-full ${section.dot}`}
-                  aria-hidden="true"
+        <div>
+          {activeCards.length === 0 ? (
+            <div className="rounded-2xl bg-white/60 p-5 text-sm text-stone-500 ring-1 ring-stone-200">
+              {emptyForFilter(tab, filter)}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {activeCards.map((c) => (
+                <PlanCard
+                  key={c.id}
+                  card={c}
+                  profile={profile}
+                  defaultMode={defaultMode}
+                  plannerLabel={plannerLabel}
+                  partnerLabel={partnerLabel}
+                  shortlisted={shortlist.has(c.id)}
+                  onBook={(card) => setBooking(card)}
+                  onOpenDetails={(card) => setDetails(card)}
+                  onShare={(card) => setShared(card)}
+                  onToggleShortlist={toggleShortlist}
                 />
-                <div className="min-w-0">
-                  <p
-                    className={`text-[11px] font-bold tracking-[0.2em] ${section.eyebrowTone}`}
-                  >
-                    {section.eyebrow}
-                  </p>
-                  <h2 className="text-xl font-semibold tracking-tight">{section.title}</h2>
-                  <p className="text-sm text-stone-500">{section.subtitle}</p>
-                </div>
-              </div>
-              {cards.length === 0 ? (
-                <div className="rounded-2xl bg-white/60 p-5 text-sm text-stone-500 ring-1 ring-stone-200">
-                  {emptyCopy(section.key)}
-                </div>
-              ) : (
-                <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                  {cards.map((c) => (
-                    <div
-                      key={c.id}
-                      className="w-[84vw] max-w-[320px] flex-shrink-0 snap-start"
-                    >
-                      <PlanCard
-                        card={c}
-                        profile={profile}
-                        defaultMode={defaultMode}
-                        plannerLabel={plannerLabel}
-                        partnerLabel={partnerLabel}
-                        onBook={(card) => setBooking(card)}
-                        onOpenDetails={(card) => setDetails(card)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          )
-        })}
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -223,15 +242,95 @@ export function ResultsView({
           card={details}
           profile={profile}
           defaultMode={defaultMode}
-          startA={startA}
-          startB={startB}
+          startA={startA ?? undefined}
+          startB={startB ?? undefined}
+          allCards={allCards}
+          shortlisted={shortlist.has(details.id)}
+          onSelectCrossRec={(card) => setDetails(card)}
           onBook={(card) => {
             setDetails(null)
             setBooking(card)
           }}
+          onShare={(card) => setShared(card)}
+          onToggleShortlist={toggleShortlist}
           onClose={() => setDetails(null)}
         />
       )}
+    </div>
+  )
+}
+
+function applyFilter(cards: PlanCardType[], filter: Filter, shortlist: Set<string>): PlanCardType[] {
+  switch (filter) {
+    case 'all':
+      return cards
+    case 'recommended':
+      return cards.filter((c) => c.badge === 'critic_pick' || c.badge === 'award_fresh' || c.trending_score >= 0.7)
+    case 'limited':
+      return cards.filter((c) => c.badge === 'closing_soon')
+    case 'new':
+      return cards.filter((c) => c.badge === 'soft_launch')
+    case 'shortlist':
+      return cards.filter((c) => shortlist.has(c.id))
+  }
+}
+
+function emptyForFilter(tab: Tab, filter: Filter): string {
+  if (filter === 'shortlist') {
+    return tab === 'dining'
+      ? 'No dining places shortlisted yet — tap ☆ on a card to save it.'
+      : 'No events shortlisted yet — tap ☆ on a card to save it.'
+  }
+  if (filter === 'limited') return 'No limited-run picks in this category.'
+  if (filter === 'new') return 'No newly opened picks in this category.'
+  if (filter === 'recommended') return 'No critic / award picks in this category.'
+  return tab === 'dining'
+    ? 'No dining matches for this time. Try the Events tab or shift the time.'
+    : 'No events on for this slot. Try the Dining tab or pick another evening.'
+}
+
+function CategoryTabs({
+  active,
+  onChange,
+  counts,
+}: {
+  active: Tab
+  onChange: (t: Tab) => void
+  counts: Record<Tab, number>
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Result category"
+      className="inline-flex rounded-full bg-stone-100 p-1 ring-1 ring-stone-200"
+    >
+      {TABS.map((t) => {
+        const on = t.key === active
+        return (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            onClick={() => onChange(t.key)}
+            className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+              on
+                ? 'bg-white text-stone-900 shadow-sm ring-1 ring-stone-200'
+                : 'text-stone-500 hover:text-stone-800'
+            }`}
+          >
+            <span aria-hidden="true">{t.icon}</span>
+            <span>{t.label}</span>
+            <span
+              className={`ml-1 rounded-full px-1.5 text-[10px] font-bold ${
+                on ? 'bg-rose-100 text-rose-700' : 'bg-stone-200 text-stone-600'
+              }`}
+            >
+              {counts[t.key]}
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -250,11 +349,4 @@ function ViewTab({ active, onClick, label }: { active: boolean; onClick: () => v
       {label}
     </button>
   )
-}
-
-function emptyCopy(key: keyof Buckets): string {
-  if (key === 'safe')
-    return 'No easy picks this time — your start points may be too far apart. Try a closer meeting point.'
-  if (key === 'stretch') return 'No mid-range picks matched. Widen your cuisine preferences to fill this row.'
-  return 'No fresh or buzzy spots fit this slot. Check a later time — pop-ups often open evenings.'
 }

@@ -56,6 +56,8 @@ export type RankedVenue = Venue & {
   components: { fairness: number; match: number; freshness: number; friction: number }
 }
 
+export type Category = 'dining' | 'event'
+
 export type PlanCard = RankedVenue & {
-  bucket: 'safe' | 'stretch' | 'wild'
+  bucket: Category
 }

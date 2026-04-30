@@ -11,8 +11,8 @@ const TRANSIT_PREFS = new Set(['mrt', 'grab', 'either'])
 const VIBE_TAGS = new Set(['cozy', 'adventurous', 'celebratory', 'low_key'])
 
 export type PlanRequest = {
-  start_a: LatLng
-  start_b: LatLng
+  start_a: LatLng | null
+  start_b: LatLng | null
   scheduled_for: string
   override_tags: string[]
   profile: Profile
@@ -21,12 +21,15 @@ export type PlanRequest = {
 export function parsePlanRequest(value: unknown): PlanRequest | null {
   if (!isRecord(value)) return null
 
-  const startA = parseLatLng(value.start_a)
-  const startB = parseLatLng(value.start_b)
+  // Locations are optional. If a key is provided but doesn't validate as a SG
+  // coord, reject — we'd rather error than silently downgrade to islandwide.
+  const startA = parseOptionalLatLng(value.start_a)
+  const startB = parseOptionalLatLng(value.start_b)
+  if (startA === undefined || startB === undefined) return null
+
   const scheduledFor = parseString(value.scheduled_for, 80)
   const profile = parseProfile(value.profile)
-
-  if (!startA || !startB || !scheduledFor || !profile) return null
+  if (!scheduledFor || !profile) return null
 
   return {
     start_a: startA,
@@ -35,6 +38,13 @@ export function parsePlanRequest(value: unknown): PlanRequest | null {
     override_tags: parseStringArray(value.override_tags, 12, 60),
     profile,
   }
+}
+
+// Returns null when the field is missing, the parsed point when valid, or
+// undefined when it was provided but invalid (so callers can reject).
+function parseOptionalLatLng(value: unknown): LatLng | null | undefined {
+  if (value == null) return null
+  return parseLatLng(value) ?? undefined
 }
 
 export function parseLatLng(value: unknown): LatLng | null {

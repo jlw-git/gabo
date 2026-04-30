@@ -39,6 +39,22 @@ export function clearStoredProfile(): void {
   localStorage.removeItem(PROFILE_KEY)
 }
 
+// Default profile used when a fresh visitor lands without an onboarding flow.
+// Empty preferences mean filters on the results page are the source of truth
+// for personalization — scoring leans on freshness + fairness.
+export function emptyProfile(): Profile {
+  return {
+    planner_name: '',
+    partner_name: '',
+    cuisines_loved: [],
+    cuisines_avoided: [],
+    dietary_hardstops: [],
+    vibe_defaults: [],
+    budget_bands: [],
+    transit_pref: 'either',
+  }
+}
+
 export function loadLastStarts(): LastStarts | null {
   if (typeof window === 'undefined') return null
   try {

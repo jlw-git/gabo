@@ -1,6 +1,8 @@
 'use client'
 
+import { useMemo } from 'react'
 import type { DayKey, HoursWindow, PlanCard as PlanCardType, Profile, TransitMode } from '@/lib/planner/types'
+import { isEvent } from '@/lib/planner/category'
 import { grabRideUrl } from '@/lib/grab-ride'
 import { FairnessPill } from './FairnessPill'
 import { VenueMiniMap } from './VenueMiniMap'
@@ -12,7 +14,14 @@ type Props = {
   defaultMode: TransitMode
   startA?: PlaceSelection
   startB?: PlaceSelection
+  // Full result set so we can surface cross-category nearby picks at the
+  // bottom of the modal. Pass undefined to suppress the cross-recs section.
+  allCards?: PlanCardType[]
+  shortlisted?: boolean
+  onSelectCrossRec?: (card: PlanCardType) => void
   onBook: (card: PlanCardType) => void
+  onShare?: (card: PlanCardType) => void
+  onToggleShortlist?: (card: PlanCardType) => void
   onClose: () => void
 }
 
@@ -33,20 +42,42 @@ const BADGE_COPY: Record<string, string> = {
   award_fresh: 'Award-winning',
 }
 
+const CROSS_REC_LIMIT = 3
+const CROSS_REC_MAX_KM = 6
+
 export function VenueDetailModal({
   card,
   profile,
   defaultMode,
   startA,
   startB,
+  allCards,
+  shortlisted = false,
+  onSelectCrossRec,
   onBook,
+  onShare,
+  onToggleShortlist,
   onClose,
 }: Props) {
   const todayKey = todayDayKey()
   const badge = card.badge !== 'none' ? BADGE_COPY[card.badge] : null
+  const event = isEvent(card)
   const budgetLabel = '$'.repeat(card.budget_band)
   const plannerLabel = profile.planner_name?.trim() || 'You'
   const partnerLabel = profile.partner_name?.trim() || 'Partner'
+  const showFairness = card.eta_a_min > 0 || card.eta_b_min > 0
+  const primaryCta = event ? 'Get tickets' : 'Reserve'
+
+  const crossRecs = useMemo(() => {
+    if (!allCards || !onSelectCrossRec) return []
+    const oppositeIsEvent = !event
+    return allCards
+      .filter((c) => c.id !== card.id && isEvent(c) === oppositeIsEvent)
+      .map((c) => ({ c, km: distanceKm(card, c) }))
+      .filter((x) => x.km <= CROSS_REC_MAX_KM)
+      .sort((a, b) => a.km - b.km)
+      .slice(0, CROSS_REC_LIMIT)
+  }, [allCards, onSelectCrossRec, event, card])
 
   return (
     <div
@@ -62,13 +93,36 @@ export function VenueDetailModal({
             // eslint-disable-next-line @next/next/no-img-element
             <img src={card.photo_url} alt={card.name} className="h-full w-full object-cover" />
           )}
-          <button
-            onClick={onClose}
-            className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-stone-700 shadow backdrop-blur hover:bg-white"
-            aria-label="Close"
-          >
-            ✕
-          </button>
+          <div className="absolute right-3 top-3 flex gap-2">
+            {onToggleShortlist && (
+              <button
+                onClick={() => onToggleShortlist(card)}
+                aria-label={shortlisted ? `Remove ${card.name} from shortlist` : `Add ${card.name} to shortlist`}
+                aria-pressed={shortlisted}
+                className={`flex h-9 w-9 items-center justify-center rounded-full text-base shadow backdrop-blur transition ${
+                  shortlisted ? 'bg-rose-600 text-white' : 'bg-white/90 text-stone-700 hover:bg-white'
+                }`}
+              >
+                {shortlisted ? '★' : '☆'}
+              </button>
+            )}
+            {onShare && (
+              <button
+                onClick={() => onShare(card)}
+                aria-label={`Share ${card.name}`}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-stone-700 shadow backdrop-blur hover:bg-white"
+              >
+                ↗
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-stone-700 shadow backdrop-blur hover:bg-white"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
           {badge && (
             <span className="absolute left-3 top-3 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur">
               {badge}
@@ -80,22 +134,29 @@ export function VenueDetailModal({
           <div>
             <div className="flex items-start justify-between gap-3">
               <div>
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-stone-500">
+                  {event ? 'Event' : 'Dining'}
+                </span>
                 <h2 className="text-2xl font-semibold tracking-tight">{card.name}</h2>
                 {card.address && <p className="mt-0.5 text-sm text-stone-500">{card.address}</p>}
               </div>
-              <span className="whitespace-nowrap rounded-full bg-stone-100 px-2.5 py-1 text-xs font-semibold text-stone-700">
-                {budgetLabel}
-              </span>
+              {!event && (
+                <span className="whitespace-nowrap rounded-full bg-stone-100 px-2.5 py-1 text-xs font-semibold text-stone-700">
+                  {budgetLabel}
+                </span>
+              )}
             </div>
           </div>
 
-          <FairnessPill
-            drivingEtaA={card.eta_a_min}
-            drivingEtaB={card.eta_b_min}
-            defaultMode={defaultMode}
-            plannerLabel={plannerLabel}
-            partnerLabel={partnerLabel}
-          />
+          {showFairness && (
+            <FairnessPill
+              drivingEtaA={card.eta_a_min}
+              drivingEtaB={card.eta_b_min}
+              defaultMode={defaultMode}
+              plannerLabel={plannerLabel}
+              partnerLabel={partnerLabel}
+            />
+          )}
 
           <VenueMiniMap
             venue={{ lat: card.lat, lng: card.lng, name: card.name }}
@@ -123,7 +184,7 @@ export function VenueDetailModal({
             </div>
           </Section>
 
-          <Section title="Cuisine">
+          <Section title={event ? 'Type' : 'Cuisine'}>
             <TagRow tags={card.cuisine_tags} emphasized={profile.cuisines_loved} />
           </Section>
 
@@ -139,12 +200,41 @@ export function VenueDetailModal({
             </Section>
           )}
 
+          {crossRecs.length > 0 && onSelectCrossRec && (
+            <Section title={event ? 'Dine before this' : 'After your meal'}>
+              <div className="space-y-2">
+                {crossRecs.map(({ c, km }) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => onSelectCrossRec(c)}
+                    className="flex w-full items-center gap-3 rounded-xl bg-stone-50 p-2.5 text-left ring-1 ring-stone-200 transition hover:bg-white hover:ring-stone-300"
+                  >
+                    <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-stone-200">
+                      {c.photo_url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={c.photo_url} alt="" className="h-full w-full object-cover" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="line-clamp-1 text-sm font-semibold text-stone-900">{c.name}</div>
+                      <div className="line-clamp-1 text-xs text-stone-500">
+                        {km.toFixed(1)} km away{c.address ? ` · ${c.address}` : ''}
+                      </div>
+                    </div>
+                    <span aria-hidden="true" className="text-stone-400">›</span>
+                  </button>
+                ))}
+              </div>
+            </Section>
+          )}
+
           <div className="flex gap-2 pt-1">
             <button
               onClick={() => onBook(card)}
               className="flex-1 rounded-xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-700 active:scale-[0.98]"
             >
-              Book
+              {primaryCta}
             </button>
             <a
               href={grabRideUrl({ lat: card.lat, lng: card.lng, name: card.name })}
@@ -158,6 +248,20 @@ export function VenueDetailModal({
       </div>
     </div>
   )
+}
+
+function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371
+  const dLat = toRad(b.lat - a.lat)
+  const dLng = toRad(b.lng - a.lng)
+  const lat1 = toRad(a.lat)
+  const lat2 = toRad(b.lat)
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+function toRad(deg: number): number {
+  return (deg * Math.PI) / 180
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

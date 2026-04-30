@@ -55,12 +55,10 @@ const BUDGETS = [
   { value: 4, label: '$$$$', hint: 'Over $100 per person' },
 ]
 
-const TOTAL_STEPS = 4
+const TOTAL_STEPS = 3
 
 export function OnboardingQuiz({ onComplete }: Props) {
   const [step, setStep] = useState(1)
-  const [plannerName, setPlannerName] = useState('')
-  const [partnerName, setPartnerName] = useState('')
   const [loved, setLoved] = useState<string[]>([])
   const [avoided, setAvoided] = useState<string[]>([])
   const [dietary, setDietary] = useState<string[]>([])
@@ -74,8 +72,10 @@ export function OnboardingQuiz({ onComplete }: Props) {
   function finish() {
     onComplete({
       profile: {
-        planner_name: plannerName.trim() || 'You',
-        partner_name: partnerName.trim() || 'Partner',
+        // Names are not collected in onboarding. UI falls back to "You" / "Partner"
+        // wherever a label is needed.
+        planner_name: '',
+        partner_name: '',
         cuisines_loved: loved,
         cuisines_avoided: avoided,
         dietary_hardstops: dietary,
@@ -100,33 +100,7 @@ export function OnboardingQuiz({ onComplete }: Props) {
 
       {step === 1 && (
         <StepShell
-          eyebrow="Step 1 of 4"
-          title="Who’s planning?"
-          subtitle="Optional — used on the plan card you share with your partner."
-        >
-          <div className="space-y-3">
-            <TextField
-              id="planner"
-              label="Your name"
-              value={plannerName}
-              onChange={setPlannerName}
-              placeholder="e.g. Alex"
-              autoFocus
-            />
-            <TextField
-              id="partner"
-              label="Your partner’s name"
-              value={partnerName}
-              onChange={setPartnerName}
-              placeholder="e.g. Sam"
-            />
-          </div>
-        </StepShell>
-      )}
-
-      {step === 2 && (
-        <StepShell
-          eyebrow="Step 2 of 4"
+          eyebrow="Step 1 of 3"
           title="What do you both love to eat?"
           subtitle="Pick a few. We’ll lean toward these. Skip if you’re easy."
         >
@@ -138,9 +112,9 @@ export function OnboardingQuiz({ onComplete }: Props) {
         </StepShell>
       )}
 
-      {step === 3 && (
+      {step === 2 && (
         <StepShell
-          eyebrow="Step 3 of 4"
+          eyebrow="Step 2 of 3"
           title="Anything to avoid?"
           subtitle="Cuisines you’d rather skip and any dietary needs. Add your own if the chips don’t cover it."
         >
@@ -173,9 +147,9 @@ export function OnboardingQuiz({ onComplete }: Props) {
         </StepShell>
       )}
 
-      {step === 4 && (
+      {step === 3 && (
         <StepShell
-          eyebrow="Step 4 of 4"
+          eyebrow="Step 3 of 3"
           title="Moods and budgets you like."
           subtitle="Pick any number. We’ll weight recommendations across what you’ve chosen."
         >
@@ -302,40 +276,6 @@ function StepShell({
         <p className="text-sm text-stone-500">{subtitle}</p>
       </header>
       {children}
-    </div>
-  )
-}
-
-function TextField({
-  id,
-  label,
-  value,
-  onChange,
-  placeholder,
-  autoFocus,
-}: {
-  id: string
-  label: string
-  value: string
-  onChange: (v: string) => void
-  placeholder?: string
-  autoFocus?: boolean
-}) {
-  return (
-    <div>
-      <label htmlFor={id} className="mb-1 block text-xs font-medium uppercase tracking-wider text-stone-500">
-        {label}
-      </label>
-      <input
-        id={id}
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        autoFocus={autoFocus}
-        maxLength={40}
-        className="w-full rounded-xl bg-white px-3 py-2.5 text-sm ring-1 ring-stone-200 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-rose-300"
-      />
     </div>
   )
 }

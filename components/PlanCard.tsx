@@ -1,4 +1,5 @@
 import type { PlanCard as PlanCardType, Profile, TransitMode } from '@/lib/planner/types'
+import { isEvent } from '@/lib/planner/category'
 import { grabRideUrl } from '@/lib/grab-ride'
 import { FairnessPill } from './FairnessPill'
 
@@ -8,9 +9,14 @@ type Props = {
   defaultMode: TransitMode
   plannerLabel: string
   partnerLabel: string
+  shortlisted?: boolean
   onBook: (card: PlanCardType) => void
   onOpenDetails: (card: PlanCardType) => void
+  onShare?: (card: PlanCardType) => void
+  onToggleShortlist?: (card: PlanCardType) => void
 }
+
+const TRENDING_THRESHOLD = 0.7
 
 export function PlanCard({
   card,
@@ -18,11 +24,19 @@ export function PlanCard({
   defaultMode,
   plannerLabel,
   partnerLabel,
+  shortlisted = false,
   onBook,
   onOpenDetails,
+  onShare,
+  onToggleShortlist,
 }: Props) {
+  const event = isEvent(card)
   const badgeCopy = badgeLabel(card)
   const whyForThem = composeWhy(card, profile)
+  const showFairness = card.eta_a_min > 0 || card.eta_b_min > 0
+  const showTrending = card.badge === 'none' && card.trending_score >= TRENDING_THRESHOLD
+  const ring = ringForBadge(card)
+  const primaryCta = event ? 'Get tickets' : 'Reserve'
 
   function stop(e: React.MouseEvent | React.KeyboardEvent) {
     e.stopPropagation()
@@ -30,7 +44,7 @@ export function PlanCard({
 
   return (
     <article
-      className="group cursor-pointer overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-stone-200 transition hover:-translate-y-0.5 hover:shadow-md hover:ring-stone-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+      className={`group cursor-pointer overflow-hidden rounded-2xl bg-white shadow-sm ring-1 transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 ${ring.base} ${ring.hover}`}
       onClick={() => onOpenDetails(card)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -47,11 +61,46 @@ export function PlanCard({
           // eslint-disable-next-line @next/next/no-img-element
           <img src={card.photo_url} alt={card.name} className="h-full w-full object-cover" />
         )}
-        {badgeCopy && (
-          <span className="absolute right-3 top-3 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur">
-            {badgeCopy}
-          </span>
-        )}
+        <div className="absolute right-3 top-3 flex flex-col items-end gap-1.5">
+          {badgeCopy && (
+            <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold backdrop-blur ${badgeChip(card)}`}>
+              {badgeCopy}
+            </span>
+          )}
+          {showTrending && (
+            <span className="rounded-full bg-orange-500/90 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur">
+              🔥 Trending
+            </span>
+          )}
+          <div className="flex gap-1.5">
+            {onToggleShortlist && (
+              <IconButton
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleShortlist(card)
+                }}
+                label={shortlisted ? `Remove ${card.name} from shortlist` : `Add ${card.name} to shortlist`}
+                pressed={shortlisted}
+              >
+                {shortlisted ? '★' : '☆'}
+              </IconButton>
+            )}
+            {onShare && (
+              <IconButton
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onShare(card)
+                }}
+                label={`Share ${card.name}`}
+              >
+                ↗
+              </IconButton>
+            )}
+          </div>
+        </div>
+        <span className="absolute left-3 top-3 rounded-full bg-white/85 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-stone-700 backdrop-blur">
+          {event ? 'Event' : 'Dining'}
+        </span>
         <span
           aria-hidden="true"
           className="absolute left-3 bottom-3 inline-flex items-center gap-1 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-semibold text-stone-700 shadow-sm backdrop-blur transition group-hover:bg-white"
@@ -77,13 +126,15 @@ export function PlanCard({
           </span>
         </div>
 
-        <FairnessPill
-          drivingEtaA={card.eta_a_min}
-          drivingEtaB={card.eta_b_min}
-          defaultMode={defaultMode}
-          plannerLabel={plannerLabel}
-          partnerLabel={partnerLabel}
-        />
+        {showFairness && (
+          <FairnessPill
+            drivingEtaA={card.eta_a_min}
+            drivingEtaB={card.eta_b_min}
+            defaultMode={defaultMode}
+            plannerLabel={plannerLabel}
+            partnerLabel={partnerLabel}
+          />
+        )}
 
         <p className="line-clamp-3 h-[3lh] text-sm leading-snug text-stone-700">
           {whyForThem}
@@ -97,7 +148,7 @@ export function PlanCard({
             }}
             className="flex-1 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 active:scale-[0.98]"
           >
-            Book
+            {primaryCta}
           </button>
           <a
             href={grabRideUrl({ lat: card.lat, lng: card.lng, name: card.name })}
@@ -113,9 +164,68 @@ export function PlanCard({
   )
 }
 
-// "Closing soon" previously read as permanent closure. When badge_meta carries
-// an end date, show "Ends <Mon>"; otherwise "Limited run". Other badges stay
-// short and unambiguous.
+function IconButton({
+  children,
+  onClick,
+  label,
+  pressed,
+}: {
+  children: React.ReactNode
+  onClick: (e: React.MouseEvent) => void
+  label: string
+  pressed?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onKeyDown={(e) => e.stopPropagation()}
+      aria-label={label}
+      aria-pressed={pressed}
+      className={`flex h-8 w-8 items-center justify-center rounded-full text-base shadow-sm backdrop-blur transition active:scale-95 ${
+        pressed
+          ? 'bg-rose-600 text-white hover:bg-rose-700'
+          : 'bg-white/95 text-stone-700 hover:bg-white'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+// Badge-driven highlighting. Ring colour signals "this one's worth a look"
+// before the user reads the badge text — closing-soon pop-ups in particular
+// are time-sensitive so they earn a stronger visual cue.
+function ringForBadge(card: PlanCardType): { base: string; hover: string } {
+  switch (card.badge) {
+    case 'closing_soon':
+      return { base: 'ring-rose-300', hover: 'hover:ring-rose-400' }
+    case 'soft_launch':
+      return { base: 'ring-emerald-300', hover: 'hover:ring-emerald-400' }
+    case 'critic_pick':
+      return { base: 'ring-amber-300', hover: 'hover:ring-amber-400' }
+    case 'award_fresh':
+      return { base: 'ring-violet-300', hover: 'hover:ring-violet-400' }
+    default:
+      return { base: 'ring-stone-200', hover: 'hover:ring-stone-300' }
+  }
+}
+
+function badgeChip(card: PlanCardType): string {
+  switch (card.badge) {
+    case 'closing_soon':
+      return 'bg-rose-600/90 text-white'
+    case 'soft_launch':
+      return 'bg-emerald-600/90 text-white'
+    case 'critic_pick':
+      return 'bg-amber-600/90 text-white'
+    case 'award_fresh':
+      return 'bg-violet-600/90 text-white'
+    default:
+      return 'bg-black/70 text-white'
+  }
+}
+
 function badgeLabel(card: PlanCardType): string | null {
   if (card.badge === 'none') return null
   if (card.badge === 'closing_soon') {
@@ -136,19 +246,22 @@ function badgeLabel(card: PlanCardType): string | null {
 }
 
 function composeWhy(card: PlanCardType, profile: Profile): string {
+  const event = isEvent(card)
   const lovedHit = card.cuisine_tags.find((c) => profile.cuisines_loved.includes(c))
   const vibes = profile.vibe_defaults ?? []
   const vibeHit = card.vibe_tags.find((v) => (vibes as string[]).includes(v))
 
-  const headline = lovedHit
-    ? `${pretty(lovedHit)} night — a favourite of yours`
-    : vibeHit
-      ? `${capitalize(vibeHit)} mood`
-      : `${pretty(card.cuisine_tags[0] ?? 'Dinner')} for two`
+  const headline = event
+    ? eventHeadline(card, vibeHit)
+    : lovedHit
+      ? `${pretty(lovedHit)} night — a favourite of yours`
+      : vibeHit
+        ? `${capitalize(vibeHit)} mood`
+        : `${pretty(card.cuisine_tags[0] ?? 'Dinner')} for two`
 
   const tail =
     card.badge === 'closing_soon'
-      ? 'limited-run pop-up, catch it while you can'
+      ? 'catch it before it ends'
       : card.badge === 'soft_launch'
         ? 'freshly opened'
         : card.badge === 'critic_pick'
@@ -158,6 +271,14 @@ function composeWhy(card: PlanCardType, profile: Profile): string {
             : null
 
   return tail ? `${headline} · ${tail}.` : `${headline}.`
+}
+
+function eventHeadline(card: PlanCardType, vibeHit: string | undefined): string {
+  const SPECIAL = new Set(['art', 'exhibition', 'music', 'games', 'outdoor', 'nature', 'nightlife'])
+  const primary = card.cuisine_tags.find((t) => SPECIAL.has(t)) ?? 'experience'
+  const label = pretty(primary)
+  if (vibeHit) return `${capitalize(vibeHit)} ${label.toLowerCase()}`
+  return label
 }
 
 function pretty(tag: string): string {
