@@ -5,6 +5,7 @@ import type { DayKey, HoursWindow, PlanCard as PlanCardType, Profile, TransitMod
 import { isEvent } from '@/lib/planner/category'
 import { directionsUrl } from '@/lib/directions'
 import { FairnessPill } from './FairnessPill'
+import { SourceAttribution } from './SourceAttribution'
 import { VenueMiniMap } from './VenueMiniMap'
 import type { PlaceSelection } from './PlaceSearchInput'
 
@@ -142,6 +143,11 @@ export function VenueDetailModal({
                 </span>
                 <h2 className="text-2xl font-semibold tracking-tight">{card.name}</h2>
                 {card.address && <p className="mt-0.5 text-sm text-stone-500">{card.address}</p>}
+                {card.source && card.source !== 'manual' && (
+                  <div className="mt-1.5">
+                    <SourceAttribution source={card.source} sourceUrl={card.source_url} />
+                  </div>
+                )}
               </div>
               {!event && (
                 <span className="whitespace-nowrap rounded-full bg-stone-100 px-2.5 py-1 text-xs font-semibold text-stone-700">

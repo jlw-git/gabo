@@ -3,6 +3,14 @@
     {
       "path": "/api/cron/trending",
       "schedule": "0 4 * * 1"
+    },
+    {
+      "path": "/api/cron/sync-dining",
+      "schedule": "0 5 * * 1"
+    },
+    {
+      "path": "/api/cron/sync-events",
+      "schedule": "0 6 * * *"
     }
   ]
 }

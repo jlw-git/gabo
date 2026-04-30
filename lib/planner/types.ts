@@ -6,6 +6,15 @@ export type HoursJson = Partial<Record<DayKey, HoursWindow[]>>
 
 export type Badge = 'closing_soon' | 'soft_launch' | 'critic_pick' | 'award_fresh' | 'none'
 
+export type VenueSource =
+  | 'google_places'
+  | 'foursquare'
+  | 'bandsintown'
+  | 'sistic'
+  | 'museum'
+  | 'editorial'
+  | 'manual'
+
 export type Venue = {
   id: string
   name: string
@@ -25,6 +34,14 @@ export type Venue = {
   badge_meta: Record<string, unknown> | null
   trending_score: number
   active: boolean
+  // Provenance — where the catalog row came from. Surfaced in the UI per
+  // each provider's TOS (Google requires "via Google", Foursquare similar).
+  // Older hand-seeded rows default to 'manual'; editorial rows must have a
+  // source_url pointing to the official public page.
+  source?: VenueSource
+  source_id?: string | null
+  source_url?: string | null
+  last_synced_at?: string | null
 }
 
 export type VibeTag = 'cozy' | 'adventurous' | 'celebratory' | 'low_key'

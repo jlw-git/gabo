@@ -2,6 +2,7 @@ import type { LatLng, PlanCard as PlanCardType, Profile, TransitMode } from '@/l
 import { isEvent } from '@/lib/planner/category'
 import { directionsUrl } from '@/lib/directions'
 import { FairnessPill } from './FairnessPill'
+import { SourceAttribution } from './SourceAttribution'
 
 type Props = {
   card: PlanCardType
@@ -172,6 +173,12 @@ export function PlanCard({
             Directions
           </a>
         </div>
+
+        {card.source && card.source !== 'manual' && (
+          <div className="pt-1" onClick={stop}>
+            <SourceAttribution source={card.source} sourceUrl={card.source_url} />
+          </div>
+        )}
       </div>
     </article>
   )
