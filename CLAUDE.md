@@ -8,7 +8,7 @@ Date-night planner for dual-income Singapore households. Originally built for th
 Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + Supabase (Postgres + RLS). Read [AGENTS.md](AGENTS.md) — Next.js 16 has breaking changes; check `node_modules/next/dist/docs/` before writing Next-specific code.
 
 ## Current build state
-- Supabase live, 53 venues seeded via `scripts/seed-supabase.mjs` (idempotent: deletes + reseeds). Catalog still hand-curated; replacement with Google Places + Foursquare for dining and Sistic + museum sites + Bandsintown + editorial for events is parked.
+- Supabase live. Venue catalog is now real-source: Google Places (with Foursquare fallback) for dining, Bandsintown + editorial for events. Per-row `source`/`source_url` columns power UI attribution. Hand-seeded `source='manual'` rows wiped via `/api/admin/reseed`.
 - Onboarding auto-skipped on first visit (empty profile written). Profile persists to `localStorage['gabo:profile-v2']`.
 - **Planner-first home**: form is the hero, recs feed below as a tasting strip ("Right now in Singapore", capped to 3 cards × 3 sections).
 - Form: When (required) + two optional `PlaceSearchInput` fields (OneMap, pre-filled from `localStorage['gabo:last-starts-v1']`) + Special Occasion behind a disclosure.
@@ -30,10 +30,14 @@ Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + Supabase (Postgr
 - `app/api/prewarm/` — warms OneMap drive cache for popular start points
 - `app/api/shortlist-event/` — anonymous logger feeding internal trending velocity
 - `app/api/cron/trending/` — weekly trending refresh (`refreshTrendingScores`)
+- `app/api/cron/sync-dining/` — weekly dining catalog refresh (Google Places → Foursquare)
+- `app/api/cron/sync-events/` — daily events catalog refresh (Bandsintown + editorial)
+- `app/api/admin/reseed/` — one-shot full wipe + resync (gated by CRON_TOKEN)
 - `app/api/recommendations/` — pre-search editorial recs feed
 - `components/` — `PlanDateForm`, `PlaceSearchInput`, `PlanCard`, `FairnessPill`, `RecommendationsFeed`, `ResultsView`, `VenueDetailModal`, `BookingOverlay`, `WhatsAppShareModal`, `OverviewMap`, `VenueMiniMap`
 - `lib/onemap/` — `client.ts` (auth, search, drive, pt routes), `cache.ts`
 - `lib/trending/` — `reddit.ts`, `refresh.ts`
+- `lib/sources/` — `google-places.ts`, `foursquare.ts`, `dining-sync.ts`, `bandsintown.ts`, `editorial-events.ts`, `events-sync.ts`
 - `lib/planner/` — `types.ts`, `hours.ts` (cross-midnight aware), `score.ts`, `plan-date.ts` (incl. `applyShortlistAffinity`)
 - `lib/booking-url.ts` — chope_url → Google Search fallback
 - `lib/directions.ts` — Google Maps directions URL builder
@@ -58,12 +62,13 @@ Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + Supabase (Postgr
 - **Multi-select by default** for preferences; **skip buttons** on every onboarding step; **free-form text fallback** when chips might not cover the user's case.
 
 ## Outstanding simulation
-The venue catalog (`lib/venues/catalog.ts` → Supabase) is hand-curated. Specific exhibition venues are real but their `ends_at`, `opened`, and `badge_meta` are seeded, not pulled from a source. Two parked overhauls:
-1. **Dining** → Google Places API (free $200/mo credit) → Foursquare fallback. Per-venue `source` displayed in UI.
-2. **Events** → Sistic scraping + direct museum sites (ArtScience, NHB, National Gallery, SAM) + Bandsintown API + editorial layer (`source='editorial'`, mandatory `source_url`).
+None. The catalog now runs on real sources (see `lib/sources/`). Parked enhancements:
+- **Museum direct scrapers** (ArtScience / NGS / SAM / NHB) to shrink the editorial layer
+- **Sistic scraping** for ~70% of paid SG events (TOS review pending)
+- The legacy `lib/venues/catalog.ts` file is no longer used by the app but kept until `/api/admin/reseed` has been run in prod and verified.
 
 ## Secrets
-- `.env.local`: `ONEMAP_EMAIL`, `ONEMAP_PASSWORD`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` + `NEXT_PUBLIC_*` mirrors. Optional: `CRON_TOKEN` (gates `/api/cron/trending`), `PREWARM_TOKEN`. Never commit. The old `GRABMAPS_API_KEY` is no longer used.
+- `.env.local` (see `.env.example`): `ONEMAP_EMAIL`, `ONEMAP_PASSWORD`, `GOOGLE_PLACES_API_KEY`, `FOURSQUARE_API_KEY` (fallback), `BANDSINTOWN_APP_ID`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` + `NEXT_PUBLIC_*` mirrors. Optional: `CRON_TOKEN` (gates `/api/cron/*` and `/api/admin/reseed`), `PREWARM_TOKEN`. Never commit. The old `GRABMAPS_API_KEY` is no longer used.
 
 ## Out of scope for v1
 Partner-facing app, account sharing, push notifications, payment, rescheduling, magic-link auth (deferred — localStorage profile works for demo).

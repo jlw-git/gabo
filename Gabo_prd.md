@@ -203,24 +203,20 @@ free APIs everywhere it can:
 | Map tiles | OpenStreetMap raster | Real |
 | Weather | NEA rainfall forecast | Real (already was) |
 | Trending score | Reddit mention count (r/singapore + r/SingaporeEats + r/SingaporeFoodPorn) past 7d, hybrid-weighted with internal shortlist-velocity from `shortlist_events` | Real |
-| Reservation deep-link | `chope_url` if set, else Google Search fallback (`<name> singapore reservation/tickets`) | Mixed — see §6.1 |
-| Venue catalog | Hand-curated 53 rows in `lib/venues/catalog.ts` → Supabase | **Simulated** — see §6.1 |
+| Reservation deep-link | `chope_url` if set, else Google Search fallback (`<name> singapore reservation/tickets`) | Real |
+| **Dining venues** | Google Places (New) Text Search → Foursquare fallback per query when Google quota exhausted; quality-filtered (Google rating ≥ 4.0 with ≥ 100 ratings) | Real |
+| **Events: concerts** | Bandsintown API (city=Singapore) | Real |
+| **Events: exhibitions / pop-ups** | Editorial layer (`source='editorial'`, mandatory `source_url` pointing to the official public page — venue's own what's-on URL or ticket platform) | Real (curated) |
 
-### 6.1 Outstanding simulated layers
-The venue catalog itself is editorial fiction. Specific exhibitions
-(Marvel, Van Gogh) are real venues but their `ends_at`, `opened`, and
-`badge_meta` are hand-seeded, not pulled from any source. Two parked
-follow-ups will replace this:
+### 6.1 Provenance — `venues.source`
+Every row carries `source` ∈ {`google_places`, `foursquare`, `bandsintown`, `editorial`, `manual`}, with `source_id` (upstream's stable ID) and `source_url` (public page anyone can verify). Editorial rows are CHECK-constrained to require `source_url`. The UI surfaces "via Google" / "via Foursquare" / "official venue page" / "editor's pick" on every card per Google + Foursquare TOS.
 
-- **Dining venues** → Google Places API (free $200/mo credit) → Foursquare
-  fallback. Source attribution surfaced in the UI per Google/Foursquare TOS.
-- **Events / exhibitions** → Sistic scraping (~70% of paid SG events) +
-  direct museum sites (ArtScience, NHB, National Gallery, SAM) +
-  Bandsintown API for concerts + an `editorial` layer (`source='editorial'`,
-  required `source_url` pointing to the official page) for curated
-  premium picks. STB's TIH is closed to non-tourism-trade applicants.
+`source = 'manual'` rows are the legacy hand-seeded catalog — wiped on first run of `/api/admin/reseed`.
 
-Until those land, the catalog remains the simulation boundary.
+### 6.2 Parked follow-ups
+- **Museum direct scrapers** (ArtScience / National Gallery / SAM / NHB) — would shrink the editorial layer. Held back until each parser is validated separately; broken scrapers silently poison the catalog.
+- **Sistic scraping** — would cover ~70% of paid SG events. Held back pending TOS review.
+- **STB Tourism Information Hub** — closed to non-tourism-trade applicants (we can't register).
 
 ---
 
