@@ -129,11 +129,11 @@ export function RecommendationsFeed({ profile }: Props) {
                 <p className="text-xs text-stone-500">{section.subtitle}</p>
               </div>
             </div>
-            <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mx-0 md:grid md:snap-none md:grid-cols-2 md:overflow-visible md:px-0 lg:grid-cols-3">
               {cards.map((card) => (
                 <div
                   key={card.id}
-                  className="w-[84vw] max-w-[320px] flex-shrink-0 snap-start"
+                  className="w-[84vw] max-w-[320px] flex-shrink-0 snap-start md:w-auto md:max-w-none md:flex-shrink"
                 >
                   <PlanCard
                     card={card}

@@ -85,7 +85,7 @@ export function VenueDetailModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md overflow-hidden rounded-t-3xl bg-white shadow-xl sm:rounded-3xl"
+        className="max-h-[95vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white shadow-xl sm:max-h-[90vh] sm:rounded-3xl md:max-w-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="relative h-56 w-full bg-stone-100">

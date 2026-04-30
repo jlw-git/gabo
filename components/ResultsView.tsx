@@ -199,7 +199,7 @@ export function ResultsView({
               {emptyForFilter(tab, filter)}
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 lg:grid-cols-3">
               {activeCards.map((c) => (
                 <PlanCard
                   key={c.id}

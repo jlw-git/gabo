@@ -105,18 +105,20 @@ export default function Home() {
   }
 
   return (
-    <main className="gabo-bg flex min-h-screen w-full justify-center px-4 py-8">
-      <div className="flex w-full max-w-md flex-col">
+    <main className="gabo-bg flex min-h-screen w-full justify-center px-4 py-8 md:px-8 md:py-12">
+      <div className="flex w-full max-w-md flex-col md:max-w-4xl">
         {!hydrated && <SkeletonCard />}
         {hydrated && stage.kind === 'form' && stored && (
           <div className="space-y-10">
-            <PlanDateForm
-              onSubmit={handlePlan}
-              defaultStartA={lastStarts.a}
-              defaultStartB={lastStarts.b}
-              plannerName={stored.profile.planner_name}
-              partnerName={stored.profile.partner_name}
-            />
+            <div className="mx-auto w-full max-w-md">
+              <PlanDateForm
+                onSubmit={handlePlan}
+                defaultStartA={lastStarts.a}
+                defaultStartB={lastStarts.b}
+                plannerName={stored.profile.planner_name}
+                partnerName={stored.profile.partner_name}
+              />
+            </div>
             <RecommendationsFeed profile={stored.profile} />
           </div>
         )}
