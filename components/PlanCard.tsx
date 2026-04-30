@@ -1,6 +1,6 @@
 import type { PlanCard as PlanCardType, Profile, TransitMode } from '@/lib/planner/types'
 import { isEvent } from '@/lib/planner/category'
-import { grabRideUrl } from '@/lib/grab-ride'
+import { directionsUrl } from '@/lib/directions'
 import { FairnessPill } from './FairnessPill'
 
 type Props = {
@@ -146,17 +146,19 @@ export function PlanCard({
               e.stopPropagation()
               onBook(card)
             }}
-            className="flex-1 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 active:scale-[0.98]"
+            className="flex-1 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.98]"
           >
             {primaryCta}
           </button>
           <a
-            href={grabRideUrl({ lat: card.lat, lng: card.lng, name: card.name })}
+            href={directionsUrl({ lat: card.lat, lng: card.lng, name: card.name })}
+            target="_blank"
+            rel="noopener noreferrer"
             onClick={stop}
-            className="rounded-xl bg-[#00b14f] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#009a45] active:scale-[0.98]"
-            aria-label={`Open Grab ride to ${card.name}`}
+            className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 ring-1 ring-stone-300 transition hover:bg-stone-50 hover:text-stone-900 active:scale-[0.98]"
+            aria-label={`Get directions to ${card.name}`}
           >
-            Grab ride
+            Directions
           </a>
         </div>
       </div>
@@ -212,17 +214,19 @@ function ringForBadge(card: PlanCardType): { base: string; hover: string } {
 }
 
 function badgeChip(card: PlanCardType): string {
+  // Soft, low-saturation chips so the card content (photo, name) leads.
+  // The card ring still signals urgency for time-sensitive badges.
   switch (card.badge) {
     case 'closing_soon':
-      return 'bg-rose-600/90 text-white'
+      return 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
     case 'soft_launch':
-      return 'bg-emerald-600/90 text-white'
+      return 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
     case 'critic_pick':
-      return 'bg-amber-600/90 text-white'
+      return 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
     case 'award_fresh':
-      return 'bg-violet-600/90 text-white'
+      return 'bg-violet-50 text-violet-700 ring-1 ring-violet-200'
     default:
-      return 'bg-black/70 text-white'
+      return 'bg-white/90 text-stone-700 ring-1 ring-stone-200'
   }
 }
 

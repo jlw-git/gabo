@@ -3,7 +3,7 @@
 import { useMemo } from 'react'
 import type { DayKey, HoursWindow, PlanCard as PlanCardType, Profile, TransitMode } from '@/lib/planner/types'
 import { isEvent } from '@/lib/planner/category'
-import { grabRideUrl } from '@/lib/grab-ride'
+import { directionsUrl } from '@/lib/directions'
 import { FairnessPill } from './FairnessPill'
 import { VenueMiniMap } from './VenueMiniMap'
 import type { PlaceSelection } from './PlaceSearchInput'
@@ -232,16 +232,18 @@ export function VenueDetailModal({
           <div className="flex gap-2 pt-1">
             <button
               onClick={() => onBook(card)}
-              className="flex-1 rounded-xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-700 active:scale-[0.98]"
+              className="flex-1 rounded-xl bg-stone-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.98]"
             >
               {primaryCta}
             </button>
             <a
-              href={grabRideUrl({ lat: card.lat, lng: card.lng, name: card.name })}
-              className="rounded-xl bg-[#00b14f] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#009a45] active:scale-[0.98]"
-              aria-label={`Open Grab ride to ${card.name}`}
+              href={directionsUrl({ lat: card.lat, lng: card.lng, name: card.name })}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-stone-700 ring-1 ring-stone-300 transition hover:bg-stone-50 hover:text-stone-900 active:scale-[0.98]"
+              aria-label={`Get directions to ${card.name}`}
             >
-              Grab ride
+              Directions
             </a>
           </div>
         </div>

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import maplibregl, { Map as MlMap } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { LatLng } from '@/lib/planner/types'
+import { osmStyle } from '@/lib/map-style'
 
 type Props = {
   venue: { lat: number; lng: number; name: string }
@@ -15,9 +16,9 @@ const COLOR_VENUE = '#e11d48' // rose-600
 const COLOR_A = '#0f766e' // teal-700
 const COLOR_B = '#b45309' // amber-700
 
-// Mini-map embedded in the venue detail modal. Fetches tiles via our backend
-// proxy (never exposes the API key) and overlays both partners' routes on top
-// so fairness becomes visible instead of just numerical.
+// Mini-map embedded in the venue detail modal. OSM raster tiles + pins for
+// the venue and either partner's start point. Route overlays were dropped
+// when the GrabMaps directions API became unavailable.
 export function VenueMiniMap({ venue, startA, startB }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MlMap | null>(null)
@@ -29,21 +30,7 @@ export function VenueMiniMap({ venue, startA, startB }: Props) {
     let cancelled = false
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: 'https://maps.grab.com/api/style.json',
-      // Rewrite every maps.grab.com request (style, tiles, sprites, glyphs)
-      // through our proxy so the bearer key stays server-side. Tile fetches
-      // happen in a Web Worker which has no base URL, so we must return an
-      // absolute URL.
-      transformRequest: (url) => {
-        if (url.startsWith('https://maps.grab.com/')) {
-          const proxied = new URL(
-            `/api/grabmaps/proxy?u=${encodeURIComponent(url)}`,
-            window.location.origin
-          ).toString()
-          return { url: proxied }
-        }
-        return { url }
-      },
+      style: osmStyle(),
       center: [venue.lng, venue.lat],
       zoom: 13,
       attributionControl: false,
@@ -84,17 +71,6 @@ export function VenueMiniMap({ venue, startA, startB }: Props) {
     if (startB) bounds.extend([startB.point.lng, startB.point.lat])
     map.fitBounds(bounds, { padding: 56, duration: 0, maxZoom: 14 })
 
-    // Draw routes after map is ready.
-    map.on('load', async () => {
-      if (cancelled) return
-      const jobs: Promise<unknown>[] = []
-      if (startA) jobs.push(drawRoute(map, 'route-a', startA.point, venue, COLOR_A))
-      if (startB) jobs.push(drawRoute(map, 'route-b', startB.point, venue, COLOR_B))
-      await Promise.all(jobs).catch(() => {
-        /* route failures are non-fatal; pins still render */
-      })
-    })
-
     return () => {
       cancelled = true
       map.remove()
@@ -113,40 +89,10 @@ export function VenueMiniMap({ venue, startA, startB }: Props) {
         </div>
       )}
       <div className="pointer-events-none absolute bottom-1.5 right-2 rounded bg-white/80 px-1.5 py-0.5 text-[9px] font-medium text-stone-500 backdrop-blur">
-        GrabMaps
+        © OpenStreetMap
       </div>
     </div>
   )
-}
-
-async function drawRoute(
-  map: MlMap,
-  sourceId: string,
-  origin: LatLng,
-  destination: { lat: number; lng: number },
-  color: string
-) {
-  const res = await fetch('/api/grabmaps/route-matrix', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ origin, destination, profile: 'driving' }),
-  })
-  if (!res.ok) return
-  const data = (await res.json()) as { geometry?: GeoJSON.Geometry }
-  if (!data.geometry) return
-  if (!map.getSource(sourceId)) {
-    map.addSource(sourceId, {
-      type: 'geojson',
-      data: { type: 'Feature', geometry: data.geometry, properties: {} },
-    })
-    map.addLayer({
-      id: `${sourceId}-line`,
-      type: 'line',
-      source: sourceId,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': color, 'line-width': 4, 'line-opacity': 0.9 },
-    })
-  }
 }
 
 function pinElement(color: string, label: string): HTMLDivElement {

@@ -109,10 +109,13 @@ export function RecommendationsFeed({ profile }: Props) {
   return (
     <div className="space-y-7">
       <div className="flex items-end justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">This week in Singapore</h2>
-          <p className="text-xs text-stone-500">
-            Tap any card for details. Or use the search to plan around a specific time.
+        <div className="space-y-1">
+          <p className="text-sm font-medium tracking-wide text-rose-600">Right now in Singapore</p>
+          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+            What&rsquo;s on this week
+          </h2>
+          <p className="text-sm text-stone-500">
+            Tap any card for details, or plan around a specific time on the left.
           </p>
         </div>
       </div>

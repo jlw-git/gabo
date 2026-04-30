@@ -5,6 +5,7 @@ import maplibregl, { Map as MlMap } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { PlanCard as PlanCardType, TransitMode } from '@/lib/planner/types'
 import { simulatedMrtEta } from '@/lib/planner/score'
+import { osmStyle } from '@/lib/map-style'
 import type { Buckets } from './ResultsView'
 import type { PlaceSelection } from './PlaceSearchInput'
 
@@ -50,17 +51,7 @@ export function OverviewMap({
     if (!containerRef.current) return
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: 'https://maps.grab.com/api/style.json',
-      transformRequest: (url) => {
-        if (url.startsWith('https://maps.grab.com/')) {
-          const proxied = new URL(
-            `/api/grabmaps/proxy?u=${encodeURIComponent(url)}`,
-            window.location.origin
-          ).toString()
-          return { url: proxied }
-        }
-        return { url }
-      },
+      style: osmStyle(),
       center: SG_CENTER,
       zoom: 11,
       attributionControl: false,
@@ -151,7 +142,7 @@ export function OverviewMap({
         <LegendRow color={CATEGORY_COLOR.event} label="Events" />
       </div>
       <div className="pointer-events-none absolute bottom-1.5 right-2 rounded bg-white/80 px-1.5 py-0.5 text-[9px] font-medium text-stone-500 backdrop-blur">
-        GrabMaps
+        © OpenStreetMap
       </div>
     </div>
   )
