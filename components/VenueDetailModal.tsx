@@ -14,6 +14,8 @@ type Props = {
   defaultMode: TransitMode
   startA?: PlaceSelection
   startB?: PlaceSelection
+  // When provided, FairnessPill can fetch real public-transit ETAs.
+  scheduledFor?: Date
   // Full result set so we can surface cross-category nearby picks at the
   // bottom of the modal. Pass undefined to suppress the cross-recs section.
   allCards?: PlanCardType[]
@@ -51,6 +53,7 @@ export function VenueDetailModal({
   defaultMode,
   startA,
   startB,
+  scheduledFor,
   allCards,
   shortlisted = false,
   onSelectCrossRec,
@@ -155,6 +158,10 @@ export function VenueDetailModal({
               defaultMode={defaultMode}
               plannerLabel={plannerLabel}
               partnerLabel={partnerLabel}
+              venue={{ lat: card.lat, lng: card.lng }}
+              startA={startA ? { lat: startA.lat, lng: startA.lng } : null}
+              startB={startB ? { lat: startB.lat, lng: startB.lng } : null}
+              scheduledFor={scheduledFor}
             />
           )}
 

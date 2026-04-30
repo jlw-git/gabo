@@ -1,5 +1,5 @@
 import { mapWithConcurrency } from '@/lib/async/pool'
-import { fetchDirection, type DirectionResult } from '@/lib/grabmaps/direction'
+import { fetchDriveRoute, type DriveRouteResult } from '@/lib/onemap/client'
 import { isOpenAt } from '@/lib/planner/hours'
 import type { PlanRequest } from '@/lib/planner/request-validation'
 import {
@@ -15,7 +15,7 @@ import { catalog } from '@/lib/venues/catalog'
 import { fetchWeatherCondition, type WeatherResult } from '@/lib/weather'
 
 // Cap on how many candidates we route after hard-filtering. Each survivor
-// costs up to 2 GrabMaps Direction calls. Sized generously since with two
+// costs up to 2 OneMap drive-route calls. Sized generously since with two
 // categories (dining + events) we want depth in both.
 const ROUTING_CANDIDATE_CAP = 24
 const ROUTING_CONCURRENCY = 5
@@ -31,7 +31,7 @@ type VenueLoadResult = {
 export type PlanDateDeps = {
   loadVenues?: (profile: Profile, overrides: string[]) => Promise<VenueLoadResult>
   getWeather?: (at: Date) => Promise<WeatherResult>
-  getDirection?: (origin: LatLng, destination: LatLng) => Promise<DirectionResult>
+  getDirection?: (origin: LatLng, destination: LatLng) => Promise<DriveRouteResult>
   hasRoutingApiKey?: () => boolean
 }
 
@@ -52,15 +52,25 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
 
   const getWeather = deps.getWeather ?? fetchWeatherCondition
   const loadVenues = deps.loadVenues ?? loadVenuesWithFallback
-  const getDirection = deps.getDirection ?? fetchDirection
-  const hasRoutingApiKey = deps.hasRoutingApiKey ?? (() => Boolean(process.env.GRABMAPS_API_KEY))
+  const getDirection = deps.getDirection ?? fetchDriveRoute
+  const hasRoutingApiKey =
+    deps.hasRoutingApiKey ??
+    (() => Boolean(process.env.ONEMAP_EMAIL && process.env.ONEMAP_PASSWORD))
 
   const weather = await getWeather(scheduledDate)
   const { venues, source, fallback_reason } = await loadVenues(request.profile, request.override_tags)
-  const candidates = filterCandidates(venues, request.profile, request.override_tags, weather, scheduledDate)
+
+  // Augment the user's stated preferences with derived affinity from venues
+  // they've shortlisted. matchScore boosts venues that share cuisine_tags or
+  // vibe_tags with the user's loved set; merging shortlist tags into that set
+  // makes "more like the ones I saved" a free side-effect of the existing
+  // scoring path. No schema change, no new component.
+  const profile = applyShortlistAffinity(request.profile, request.shortlist_ids, venues)
+
+  const candidates = filterCandidates(venues, profile, request.override_tags, weather, scheduledDate)
 
   const topByPrescore = [...candidates]
-    .sort((a, b) => prescore(b, request.profile) - prescore(a, request.profile))
+    .sort((a, b) => prescore(b, profile) - prescore(a, profile))
     .slice(0, ROUTING_CANDIDATE_CAP)
 
   if (topByPrescore.length === 0) {
@@ -75,7 +85,10 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
   const needsRouting = Boolean(startA || startB)
 
   if (needsRouting && !hasRoutingApiKey()) {
-    throw new PlanDateError('GRABMAPS_API_KEY missing', 500)
+    throw new PlanDateError(
+      'OneMap credentials missing — set ONEMAP_EMAIL and ONEMAP_PASSWORD',
+      500
+    )
   }
 
   let cachedLegs = 0
@@ -91,7 +104,7 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
         if (b.cached) cachedLegs++
         return scoreWithETAs(
           venue,
-          request.profile,
+          profile,
           Math.round(a.duration_sec / 60),
           Math.round(b.duration_sec / 60),
           request.override_tags
@@ -103,13 +116,13 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
         if (a.cached) cachedLegs++
         return scoreWithSingleEta(
           venue,
-          request.profile,
+          profile,
           Math.round(a.duration_sec / 60),
           request.override_tags
         )
       }
       // No start points — islandwide search.
-      return scoreWithoutEtas(venue, request.profile, request.override_tags)
+      return scoreWithoutEtas(venue, profile, request.override_tags)
     } catch {
       return null
     }
@@ -219,4 +232,38 @@ function emptyMeta(source: VenueSource, total: number) {
 
 function emptyBuckets() {
   return { dining: [], events: [] }
+}
+
+const VIBE_TAGS = new Set(['cozy', 'adventurous', 'celebratory', 'low_key'])
+
+// Reads the user's recent shortlist, derives the cuisine/vibe tags they've
+// implicitly endorsed, and merges them into a working profile for this plan.
+// Tags from explicit preferences win ties (we don't move avoided cuisines).
+function applyShortlistAffinity(profile: Profile, shortlistIds: string[], venues: Venue[]): Profile {
+  if (!shortlistIds || shortlistIds.length === 0) return profile
+
+  const idSet = new Set(shortlistIds)
+  const saved = venues.filter((v) => idSet.has(v.id))
+  if (saved.length === 0) return profile
+
+  const avoided = new Set(profile.cuisines_avoided)
+  const cuisines = new Set(profile.cuisines_loved)
+  for (const v of saved) {
+    for (const c of v.cuisine_tags) {
+      if (!avoided.has(c)) cuisines.add(c)
+    }
+  }
+
+  const vibes = new Set<string>(profile.vibe_defaults)
+  for (const v of saved) {
+    for (const tag of v.vibe_tags) {
+      if (VIBE_TAGS.has(tag)) vibes.add(tag)
+    }
+  }
+
+  return {
+    ...profile,
+    cuisines_loved: [...cuisines],
+    vibe_defaults: [...vibes] as Profile['vibe_defaults'],
+  }
 }

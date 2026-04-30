@@ -190,12 +190,37 @@ Partner-facing app, account sharing, real-time scraping, true MRT/bus routing, p
 
 ---
 
-## 6. Demo Simulation Decisions
-- **MRT ETA**: derived client-side as `round(driving × 1.4) + 5`. GrabMaps Routing doesn't expose SG transit modes.
-- **Trending score**: seeded manually per venue; no live feed.
-- **Chope rIDs**: placeholder pattern for eateries — not verified against real Chope rIDs. The functional booking flow uses **Reserve → Chope listing URL** for dining and **Get tickets → official site** for events. Grab ride is real for both.
+## 6. Data sources — what's real, what's still simulated
 
-Everything else (fairness, routing geometry, POI search, map tiles, weather, venue filters, scoring, bucketing, cross-recs, shortlist) is live.
+GrabMaps was retired post-hackathon. The product now runs on real, public,
+free APIs everywhere it can:
+
+| Surface | Source | Real? |
+|---|---|---|
+| Drive ETAs + route geometry | OneMap `/api/public/routingsvc/route?routeType=drive` | Real |
+| Public-transit ETAs | OneMap `/api/public/routingsvc/route?routeType=pt` (lazy on toggle) | Real |
+| Address / POI search | OneMap `/api/common/elastic/search` | Real |
+| Map tiles | OpenStreetMap raster | Real |
+| Weather | NEA rainfall forecast | Real (already was) |
+| Trending score | Reddit mention count (r/singapore + r/SingaporeEats + r/SingaporeFoodPorn) past 7d, hybrid-weighted with internal shortlist-velocity from `shortlist_events` | Real |
+| Reservation deep-link | `chope_url` if set, else Google Search fallback (`<name> singapore reservation/tickets`) | Mixed — see §6.1 |
+| Venue catalog | Hand-curated 53 rows in `lib/venues/catalog.ts` → Supabase | **Simulated** — see §6.1 |
+
+### 6.1 Outstanding simulated layers
+The venue catalog itself is editorial fiction. Specific exhibitions
+(Marvel, Van Gogh) are real venues but their `ends_at`, `opened`, and
+`badge_meta` are hand-seeded, not pulled from any source. Two parked
+follow-ups will replace this:
+
+- **Dining venues** → Google Places API (free $200/mo credit) → Foursquare
+  fallback. Source attribution surfaced in the UI per Google/Foursquare TOS.
+- **Events / exhibitions** → Sistic scraping (~70% of paid SG events) +
+  direct museum sites (ArtScience, NHB, National Gallery, SAM) +
+  Bandsintown API for concerts + an `editorial` layer (`source='editorial'`,
+  required `source_url` pointing to the official page) for curated
+  premium picks. STB's TIH is closed to non-tourism-trade applicants.
+
+Until those land, the catalog remains the simulation boundary.
 
 ---
 
@@ -204,10 +229,45 @@ No public disclosure in the app. Simulation boundary documented here.
 
 ---
 
-## 8. GrabMaps Integration Surface
-Why GrabMaps is load-bearing:
+## 8. OneMap Integration Surface
+GrabMaps is gone. OneMap replaces it for everything routing/search:
 
-1. **POI search** powers the optional start-point inputs (`/api/places/search` → `/maps/poi/v1/search`).
-2. **Directions API** computes ETAs (when starts are provided), drives fairness sorting in the two-start path, and supplies the GeoJSON route geometry rendered on the detail mini-map.
-3. **Style + tiles** render both the detail mini-map and the full overview map via MapLibre. A backend proxy (`/api/grabmaps/proxy?u=<encoded>`) brokers style.json, tiles, sprites, and glyphs so `GRABMAPS_API_KEY` never reaches the browser. MapLibre's `transformRequest` rewrites every `maps.grab.com` URL through the proxy and returns absolute URLs so tile workers can resolve them.
-4. **Prewarm** (`/api/prewarm`) seeds the 1-hour direction cache for common start pairs to keep first-plan latency under 5s.
+1. **POI search** — `/api/places/search` → OneMap `/api/common/elastic/search`. Used by `PlaceSearchInput` for optional start-point inputs.
+2. **Drive routing** — `lib/onemap/client.ts#fetchDriveRoute` → OneMap routing in `drive` mode. Returns `duration_sec`, `distance_m`, GeoJSON `LineString` (decoded from Google polyline). Used by `lib/planner/plan-date.ts` to compute fairness ETAs.
+3. **Public-transit routing** — `lib/onemap/client.ts#fetchTransitRoute` → OneMap routing in `pt` mode. Used by `/api/transit-eta` which `FairnessPill` calls lazily when the user toggles to 🚆 mode. Replaces the previous `simulatedMrtEta` formula; the formula is kept as a fallback when transit lookup fails or required context is missing.
+4. **Prewarm** — `/api/prewarm` seeds the OneMap drive-route cache (`lib/onemap/cache.ts`) for popular start points × catalog.
+5. **Auth** — `lib/onemap/client.ts#getToken` exchanges `ONEMAP_EMAIL` + `ONEMAP_PASSWORD` for a 3-day JWT, cached in-memory and refreshed on 401 / near-expiry.
+
+Map tiles are OSM raster (`lib/map-style.ts#osmStyle`) — not OneMap, since
+their tile API also requires the JWT and OSM is sufficient for the demo.
+
+---
+
+## 9. Trending refresh
+
+`lib/trending/refresh.ts` recomputes `venues.trending_score` from two real
+signals, rewritten weekly by `/api/cron/trending` (Vercel Cron config in
+`vercel.json`, runs Mon 04:00 UTC):
+
+1. **External buzz** — Reddit mention count past 7d per venue across
+   r/singapore + r/SingaporeEats + r/SingaporeFoodPorn (`lib/trending/reddit.ts`).
+2. **Internal velocity** — count of shortlist additions past 7d from
+   `shortlist_events` (Supabase table, anonymous, logged via
+   `/api/shortlist-event`).
+
+Both are min-max normalised across the catalog and combined. The Reddit
+weight is 0.8 in cold-start (until total shortlist events ≥ 25 catalog-wide),
+then drops to 0.4 once internal data is meaningful.
+
+Manual run: `curl -H "Authorization: Bearer $CRON_TOKEN" https://<host>/api/cron/trending`.
+
+---
+
+## 10. Personalisation — shortlist affinity
+
+The plan request now includes `shortlist_ids: string[]` (read from
+`localStorage['gabo:shortlist-v1']`). `lib/planner/plan-date.ts#applyShortlistAffinity`
+looks up the cuisine and vibe tags of saved venues and merges them into a
+working `Profile` for that plan. Effect: venues sharing tags with the
+user's shortlist get the same `matchScore` boost as their explicit
+preferences. Cuisines that the user has explicitly avoided are not added.

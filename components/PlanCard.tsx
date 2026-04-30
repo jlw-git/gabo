@@ -1,4 +1,4 @@
-import type { PlanCard as PlanCardType, Profile, TransitMode } from '@/lib/planner/types'
+import type { LatLng, PlanCard as PlanCardType, Profile, TransitMode } from '@/lib/planner/types'
 import { isEvent } from '@/lib/planner/category'
 import { directionsUrl } from '@/lib/directions'
 import { FairnessPill } from './FairnessPill'
@@ -10,6 +10,10 @@ type Props = {
   plannerLabel: string
   partnerLabel: string
   shortlisted?: boolean
+  // Optional context to enable real public-transit ETAs in the FairnessPill.
+  startA?: LatLng | null
+  startB?: LatLng | null
+  scheduledFor?: Date
   onBook: (card: PlanCardType) => void
   onOpenDetails: (card: PlanCardType) => void
   onShare?: (card: PlanCardType) => void
@@ -25,6 +29,9 @@ export function PlanCard({
   plannerLabel,
   partnerLabel,
   shortlisted = false,
+  startA = null,
+  startB = null,
+  scheduledFor,
   onBook,
   onOpenDetails,
   onShare,
@@ -133,6 +140,10 @@ export function PlanCard({
             defaultMode={defaultMode}
             plannerLabel={plannerLabel}
             partnerLabel={partnerLabel}
+            venue={{ lat: card.lat, lng: card.lng }}
+            startA={startA}
+            startB={startB}
+            scheduledFor={scheduledFor}
           />
         )}
 
@@ -263,18 +274,65 @@ function composeWhy(card: PlanCardType, profile: Profile): string {
         ? `${capitalize(vibeHit)} mood`
         : `${pretty(card.cuisine_tags[0] ?? 'Dinner')} for two`
 
-  const tail =
-    card.badge === 'closing_soon'
-      ? 'catch it before it ends'
-      : card.badge === 'soft_launch'
-        ? 'freshly opened'
-        : card.badge === 'critic_pick'
-          ? "critic's pick"
-          : card.badge === 'award_fresh'
-            ? 'recently recognised'
-            : null
-
+  const tail = whyTail(card)
   return tail ? `${headline} · ${tail}.` : `${headline}.`
+}
+
+// Real signal where we have it — concrete dates beat platitudes.
+function whyTail(card: PlanCardType): string | null {
+  switch (card.badge) {
+    case 'closing_soon': {
+      const fmt = formatEndsAt(card.badge_meta?.ends_at as string | undefined)
+      return fmt ? `ends ${fmt}` : 'catch it before it ends'
+    }
+    case 'soft_launch': {
+      const fmt = formatOpened(card.badge_meta?.opened as string | undefined)
+      return fmt ?? 'freshly opened'
+    }
+    case 'critic_pick': {
+      const source = card.badge_meta?.source as string | undefined
+      return source ? `picked by ${source}` : "critic's pick"
+    }
+    case 'award_fresh': {
+      const award = card.badge_meta?.award as string | undefined
+      return award ? award.toLowerCase() : 'recently recognised'
+    }
+    case 'none':
+    default:
+      // Trending venues with no other badge get a trending-flavoured tail.
+      // Real product would surface aggregated saves/searches; for the demo
+      // we map the seeded score to a qualitative band — no fake numbers.
+      if (card.trending_score >= TRENDING_THRESHOLD) return trendingTail(card.trending_score)
+      return null
+  }
+}
+
+function formatEndsAt(iso: string | undefined): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  const mon = d.toLocaleString('en-SG', { month: 'short' })
+  return `${d.getDate()} ${mon}`
+}
+
+function formatOpened(iso: string | undefined): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  const days = Math.max(0, Math.round((Date.now() - d.getTime()) / 86_400_000))
+  if (days <= 1) return 'opened today'
+  if (days < 14) return `opened ${days} days ago`
+  if (days < 60) return `opened ${Math.round(days / 7)} weeks ago`
+  const month = d.toLocaleString('en-SG', { month: 'long' })
+  return d.getFullYear() === new Date().getFullYear()
+    ? `open since ${month}`
+    : `open since ${month} ${d.getFullYear()}`
+}
+
+function trendingTail(score: number): string {
+  if (score >= 0.9) return 'most-shortlisted this week'
+  if (score >= 0.8) return 'shortlisted often this week'
+  return 'picking up steam this week'
 }
 
 function eventHeadline(card: PlanCardType, vibeHit: string | undefined): string {

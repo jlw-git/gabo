@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import type { PlanCard as PlanCardType, Profile, TransitMode } from '@/lib/planner/types'
 import { isEvent } from '@/lib/planner/category'
-import { loadShortlist, saveShortlist } from '@/lib/shortlist-storage'
+import { bookingUrl } from '@/lib/booking-url'
+import { loadShortlist, logShortlistEvent, saveShortlist } from '@/lib/shortlist-storage'
 import { PlanCard } from './PlanCard'
 import { VenueDetailModal } from './VenueDetailModal'
 import { WhatsAppShareModal } from './WhatsAppShareModal'
@@ -70,8 +71,13 @@ export function RecommendationsFeed({ profile }: Props) {
   function toggleShortlist(card: PlanCardType) {
     setShortlist((prev) => {
       const next = new Set(prev)
-      if (next.has(card.id)) next.delete(card.id)
-      else next.add(card.id)
+      if (next.has(card.id)) {
+        next.delete(card.id)
+      } else {
+        next.add(card.id)
+        // Log additions only — measure save velocity, not toggle churn.
+        logShortlistEvent(card.id)
+      }
       saveShortlist([...next])
       return next
     })
@@ -171,7 +177,7 @@ export function RecommendationsFeed({ profile }: Props) {
             // Reuse share flow for "Get tickets / Reserve" from the home view —
             // there's no scheduledFor here yet, so we just hand off the link.
             setDetails(null)
-            if (details.chope_url) window.open(details.chope_url, '_blank', 'noopener,noreferrer')
+            window.open(bookingUrl(details), '_blank', 'noopener,noreferrer')
           }}
           onClose={() => setDetails(null)}
         />

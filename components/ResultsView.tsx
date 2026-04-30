@@ -6,7 +6,8 @@ import type {
   Profile,
   TransitMode,
 } from '@/lib/planner/types'
-import { loadShortlist, saveShortlist } from '@/lib/shortlist-storage'
+import { bookingUrl } from '@/lib/booking-url'
+import { loadShortlist, logShortlistEvent, saveShortlist } from '@/lib/shortlist-storage'
 import type { PlaceSelection } from './PlaceSearchInput'
 import { PlanCard } from './PlanCard'
 import { BookingOverlay } from './BookingOverlay'
@@ -70,8 +71,12 @@ export function ResultsView({
   function toggleShortlist(card: PlanCardType) {
     setShortlist((prev) => {
       const next = new Set(prev)
-      if (next.has(card.id)) next.delete(card.id)
-      else next.add(card.id)
+      if (next.has(card.id)) {
+        next.delete(card.id)
+      } else {
+        next.add(card.id)
+        logShortlistEvent(card.id)
+      }
       saveShortlist([...next])
       return next
     })
@@ -91,7 +96,7 @@ export function ResultsView({
   function confirmBooking(card: PlanCardType) {
     setBooking(null)
     setShared(card)
-    if (card.chope_url) window.open(card.chope_url, '_blank', 'noopener,noreferrer')
+    window.open(bookingUrl(card), '_blank', 'noopener,noreferrer')
   }
 
   const tabCards = tab === 'dining' ? buckets.dining : buckets.events
@@ -173,10 +178,25 @@ export function ResultsView({
       )}
 
       {totalCards === 0 && (
-        <div className="rounded-2xl bg-white p-6 text-center ring-1 ring-stone-200">
-          <p className="text-sm text-stone-600">
-            Nothing’s open at that hour. Try a later time or another day.
+        <div className="rounded-2xl bg-white p-6 ring-1 ring-stone-200">
+          <h3 className="text-base font-semibold tracking-tight">Nothing matched your slot.</h3>
+          <p className="mt-1 text-sm text-stone-600">
+            A few things to try:
           </p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-stone-600">
+            <li>Pick a later evening or push the time by an hour or two</li>
+            <li>Skip the start points to search islandwide</li>
+            <li>Loosen any cuisine or dietary filters in your profile</li>
+          </ul>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onBack}
+              className="rounded-xl bg-stone-900 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800"
+            >
+              Edit search
+            </button>
+          </div>
         </div>
       )}
 
@@ -195,9 +215,15 @@ export function ResultsView({
       {totalCards > 0 && view === 'list' && (
         <div>
           {activeCards.length === 0 ? (
-            <div className="rounded-2xl bg-white/60 p-5 text-sm text-stone-500 ring-1 ring-stone-200">
-              {emptyForFilter(tab, filter)}
-            </div>
+            <FilterEmptyState
+              tab={tab}
+              filter={filter}
+              otherTabHasContent={
+                (tab === 'dining' ? buckets.events.length : buckets.dining.length) > 0
+              }
+              onClearFilter={() => setFilter('all')}
+              onSwitchTab={() => setTab(tab === 'dining' ? 'events' : 'dining')}
+            />
           ) : (
             <div className="space-y-3 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 lg:grid-cols-3">
               {activeCards.map((c) => (
@@ -209,6 +235,9 @@ export function ResultsView({
                   plannerLabel={plannerLabel}
                   partnerLabel={partnerLabel}
                   shortlisted={shortlist.has(c.id)}
+                  startA={startA ? { lat: startA.lat, lng: startA.lng } : null}
+                  startB={startB ? { lat: startB.lat, lng: startB.lng } : null}
+                  scheduledFor={scheduledFor}
                   onBook={(card) => setBooking(card)}
                   onOpenDetails={(card) => setDetails(card)}
                   onShare={(card) => setShared(card)}
@@ -244,6 +273,7 @@ export function ResultsView({
           defaultMode={defaultMode}
           startA={startA ?? undefined}
           startB={startB ?? undefined}
+          scheduledFor={scheduledFor}
           allCards={allCards}
           shortlisted={shortlist.has(details.id)}
           onSelectCrossRec={(card) => setDetails(card)}
@@ -275,18 +305,83 @@ function applyFilter(cards: PlanCardType[], filter: Filter, shortlist: Set<strin
   }
 }
 
-function emptyForFilter(tab: Tab, filter: Filter): string {
+function emptyHeadlineForFilter(tab: Tab, filter: Filter): { headline: string; body: string } {
   if (filter === 'shortlist') {
-    return tab === 'dining'
-      ? 'Nothing saved yet. Tap ☆ on any card to keep it here.'
-      : 'Nothing saved yet. Tap ☆ on any card to keep it here.'
+    return {
+      headline: 'Nothing saved yet.',
+      body: 'Tap the ☆ on any card to keep it here for later.',
+    }
   }
-  if (filter === 'limited') return 'No limited-run picks here right now.'
-  if (filter === 'new') return 'No just-opened picks here right now.'
-  if (filter === 'recommended') return 'No critic or award picks here right now.'
+  if (filter === 'limited') {
+    return {
+      headline: 'No limited-run picks for this slot.',
+      body: 'Closing-soon pop-ups in this category aren’t open at this time.',
+    }
+  }
+  if (filter === 'new') {
+    return {
+      headline: 'No just-opened picks for this slot.',
+      body: 'Recently-opened spots in this category aren’t open at this time.',
+    }
+  }
+  if (filter === 'recommended') {
+    return {
+      headline: 'No critic or award picks for this slot.',
+      body: 'Try “All” to see every option, or switch tabs.',
+    }
+  }
   return tab === 'dining'
-    ? 'No dining options at this time. Try the Events tab, or pick another slot.'
-    : 'No events at this time. Try the Dining tab, or pick another evening.'
+    ? {
+        headline: 'No dining at this time.',
+        body: 'Try the Events tab, or pick a slightly different time.',
+      }
+    : {
+        headline: 'No events at this time.',
+        body: 'Try the Dining tab, or pick another evening.',
+      }
+}
+
+function FilterEmptyState({
+  tab,
+  filter,
+  otherTabHasContent,
+  onClearFilter,
+  onSwitchTab,
+}: {
+  tab: Tab
+  filter: Filter
+  otherTabHasContent: boolean
+  onClearFilter: () => void
+  onSwitchTab: () => void
+}) {
+  const { headline, body } = emptyHeadlineForFilter(tab, filter)
+  const otherTabLabel = tab === 'dining' ? 'Events' : 'Dining'
+  return (
+    <div className="rounded-2xl bg-white p-5 ring-1 ring-stone-200">
+      <h3 className="text-sm font-semibold tracking-tight text-stone-900">{headline}</h3>
+      <p className="mt-1 text-sm text-stone-600">{body}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {filter !== 'all' && (
+          <button
+            type="button"
+            onClick={onClearFilter}
+            className="rounded-full bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800"
+          >
+            Show all in this tab
+          </button>
+        )}
+        {otherTabHasContent && (
+          <button
+            type="button"
+            onClick={onSwitchTab}
+            className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 ring-1 ring-stone-300 hover:bg-stone-50"
+          >
+            Switch to {otherTabLabel}
+          </button>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function CategoryTabs({

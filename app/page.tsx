@@ -13,6 +13,7 @@ import {
   saveStoredProfile,
   type StoredProfile,
 } from '@/lib/profile-storage'
+import { loadShortlist } from '@/lib/shortlist-storage'
 import type { LatLng } from '@/lib/planner/types'
 
 type Stage =
@@ -84,6 +85,7 @@ export default function Home() {
           scheduled_for: payload.scheduled_for,
           override_tags: payload.override_tags,
           profile: stored.profile,
+          shortlist_ids: loadShortlist(),
         }),
       })
       if (!res.ok) {

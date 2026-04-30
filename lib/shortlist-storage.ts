@@ -33,3 +33,20 @@ export function clearShortlist() {
     /* ignore */
   }
 }
+
+// Anonymous best-effort logger — feeds the internal-velocity component of
+// trending_score. Only fires when a venue is added (not removed). Never
+// blocks UI; failures swallowed.
+export function logShortlistEvent(venueId: string) {
+  if (typeof window === 'undefined' || !venueId) return
+  try {
+    fetch('/api/shortlist-event', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ venue_id: venueId }),
+      keepalive: true,
+    }).catch(() => {})
+  } catch {
+    /* ignore */
+  }
+}

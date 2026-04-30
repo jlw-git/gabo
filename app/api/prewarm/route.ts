@@ -1,16 +1,14 @@
-import { fetchDirection } from '@/lib/grabmaps/direction'
-import { cacheStats } from '@/lib/grabmaps/cache'
+import { fetchDriveRoute } from '@/lib/onemap/client'
+import { cacheStats } from '@/lib/onemap/cache'
 import { mapWithConcurrency } from '@/lib/async/pool'
 import { catalog } from '@/lib/venues/catalog'
 import type { LatLng } from '@/lib/planner/types'
 
-// Warm the direction cache with every (common start × venue) pair so the live
-// demo doesn't depend on GrabMaps being healthy in the moment. Call once:
+// Warm the OneMap drive-route cache with every (common start × venue) pair
+// so the first plan from a popular start doesn't pay routing latency.
 //   curl -X POST http://localhost:3000/api/prewarm
-// Results: { total, real, estimated, cache_size }
+// Optionally protect with PREWARM_TOKEN.
 
-// Common SG start points — MRT interchanges / well-known areas judges are
-// likely to search for. Covers E/W/Central/CBD so most demos hit cached ETAs.
 const POPULAR_STARTS: LatLng[] = [
   { lat: 1.3181, lng: 103.8924 }, // Paya Lebar
   { lat: 1.3329, lng: 103.7436 }, // Jurong East
@@ -31,30 +29,25 @@ export async function POST(request: Request) {
     }
   }
 
-  const starts: LatLng[] = POPULAR_STARTS
   const pairs: { origin: LatLng; destination: LatLng }[] = []
-  for (const start of starts) {
+  for (const start of POPULAR_STARTS) {
     for (const v of catalog) {
       pairs.push({ origin: start, destination: { lat: v.lat, lng: v.lng } })
     }
   }
 
   const started = Date.now()
-  const results = await mapWithConcurrency(
-    pairs,
-    PREWARM_CONCURRENCY,
-    async (p) => {
-      try {
-        return await fetchDirection(p.origin, p.destination)
-      } catch {
-        return null
-      }
+  const results = await mapWithConcurrency(pairs, PREWARM_CONCURRENCY, async (p) => {
+    try {
+      await fetchDriveRoute(p.origin, p.destination)
+      return true
+    } catch {
+      return false
     }
-  )
+  })
 
-  const ok = results.filter((r) => r !== null).length
-  const failed = results.filter((r) => r === null).length
-  const elapsed_ms = Date.now() - started
+  const ok = results.filter((r) => r === true).length
+  const failed = results.filter((r) => r === false).length
 
   return Response.json({
     total: pairs.length,
@@ -62,6 +55,6 @@ export async function POST(request: Request) {
     failed,
     concurrency: PREWARM_CONCURRENCY,
     cache_size: cacheStats().size,
-    elapsed_ms,
+    elapsed_ms: Date.now() - started,
   })
 }

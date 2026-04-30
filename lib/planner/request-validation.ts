@@ -16,6 +16,9 @@ export type PlanRequest = {
   scheduled_for: string
   override_tags: string[]
   profile: Profile
+  // Venue IDs the user has previously shortlisted. Used to learn affinity
+  // (cuisine + vibe) and boost similar venues. Optional.
+  shortlist_ids: string[]
 }
 
 export function parsePlanRequest(value: unknown): PlanRequest | null {
@@ -37,6 +40,7 @@ export function parsePlanRequest(value: unknown): PlanRequest | null {
     scheduled_for: scheduledFor,
     override_tags: parseStringArray(value.override_tags, 12, 60),
     profile,
+    shortlist_ids: parseStringArray(value.shortlist_ids, 100, 64),
   }
 }
 
