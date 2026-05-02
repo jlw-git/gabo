@@ -1,23 +1,28 @@
-// Museum discovery agent. Uses Claude + web search to find current and upcoming
-// exhibitions at venues whose sites are JS-rendered (ArtScience, NHB) or
-// otherwise not fetch()-scrapeable (Gardens by the Bay seasonal shows).
+// Museum discovery agent. Uses Gemini Flash + Google Search grounding to find
+// current and upcoming exhibitions at venues whose sites are JS-rendered
+// (ArtScience, NHB) or otherwise not fetch()-scrapeable (Gardens by the Bay).
 //
 // Runs monthly via /api/cron/sync-museums. On each run it:
-//   1. Asks Claude to search the web for current exhibitions at each venue
+//   1. Asks Gemini to search the web for current exhibitions at each venue
 //   2. Upserts found exhibitions into the venues table (source: 'editorial')
 //   3. Deactivates any agent-managed rows whose ends_at has passed
 //
 // Source_ids use the pattern <prefix>-<slug>, e.g. 'artscience-future-world'.
 // Same exhibition across runs → same slug → upsert is a no-op (idempotent).
 //
-// Requires: ANTHROPIC_API_KEY
+// Requires: GOOGLE_GEMINI_API_KEY (free at aistudio.google.com, separate from
+// the Maps Platform GOOGLE_PLACES_API_KEY)
 
-import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenAI } from '@google/genai'
 import { createClient } from '@/lib/supabase/server'
 import type { HoursJson } from '@/lib/planner/types'
 import { editorialEventToVenue, type EditorialEvent } from './editorial-events'
 
-const client = new Anthropic()
+function geminiClient(): GoogleGenAI {
+  const key = process.env.GOOGLE_GEMINI_API_KEY
+  if (!key) throw new Error('GOOGLE_GEMINI_API_KEY missing')
+  return new GoogleGenAI({ apiKey: key })
+}
 
 type MuseumConfig = {
   source_prefix: string
@@ -147,33 +152,25 @@ function isRawExhibition(x: unknown): x is RawExhibition {
 
 async function searchExhibitions(museum: MuseumConfig): Promise<RawExhibition[]> {
   const today = new Date().toISOString().slice(0, 10)
+  const ai = geminiClient()
 
-  const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 2048,
-    tools: [{ type: 'web_search_20250305' as const, name: 'web_search' }],
-    messages: [
-      {
-        role: 'user',
-        content: `Search for current and upcoming exhibitions at ${museum.name} in Singapore.
+  const result = await ai.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: `Search for current and upcoming exhibitions at ${museum.name} in Singapore.
 Today is ${today}. Only include exhibitions running now or opening within the next 6 months.
-Return ONLY a raw JSON array with no markdown, no explanation. Each item:
-{
-  "name": "Exhibition Title",
-  "starts_at": "YYYY-MM-DD",
-  "ends_at": "YYYY-MM-DD",
-  "source_url": "https://official-page-url",
-  "photo_url": "https://image-url-or-null"
-}
-Search: ${museum.search_query}`,
-      },
-    ],
+Return ONLY a raw JSON array with no markdown, no explanation. Each item must have:
+- name: exhibition title
+- starts_at: YYYY-MM-DD
+- ends_at: YYYY-MM-DD
+- source_url: official page URL for this specific exhibition
+- photo_url: image URL or null
+Search query: ${museum.search_query}`,
+    config: {
+      tools: [{ googleSearch: {} }],
+    },
   })
 
-  const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text')
-  if (!textBlock) return []
-
-  const text = textBlock.text.trim()
+  const text = (result.text ?? '').trim()
   const jsonMatch = text.match(/\[[\s\S]*\]/)
   if (!jsonMatch) return []
 
