@@ -34,102 +34,15 @@ export type EditorialEvent = {
   hours?: HoursJson | null
 }
 
-// The seed list. Update as exhibitions open / close. Each entry must have a
-// real source_url -- verify before adding.
+// ArtScience Museum, NHB, and Gardens by the Bay exhibitions are now
+// discovered automatically by the museum agent (lib/sources/museum-agent.ts).
+// Esplanade is a permanent venue covered by Bandsintown for specific shows.
 //
-// NGS exhibitions are now covered by the NGS scraper in museum-scrapers.ts.
-// NHB (National Museum of Singapore) is JS-rendered and can't be scraped --
-// its confirmed exhibitions are kept here as editorial entries.
-// ArtScience Museum (MBS) times out during scraping -- kept as editorial.
-export const EDITORIAL_EVENTS: EditorialEvent[] = [
-  // -- ArtScience Museum (MBS) ---------------------------------------------
-  // Site times out; kept as editorial until scraping is feasible.
-  {
-    source_id: 'artscience-marvel-2026',
-    source_url: 'https://www.marinabaysands.com/museum/exhibitions/marvel-the-exhibition.html',
-    name: 'Marvel: The Exhibition',
-    address: 'ArtScience Museum, 6 Bayfront Ave',
-    lat: 1.286333,
-    lng: 103.859581,
-    starts_at: '2025-12-01T10:00:00+08:00',
-    ends_at: '2026-05-15T19:00:00+08:00',
-    cuisine_tags: ['experience', 'exhibition', 'art'],
-    vibe_tags: ['adventurous', 'celebratory'],
-    photo_url: null,
-    budget_band: 2,
-  },
-  {
-    source_id: 'artscience-vangogh-2026',
-    source_url: 'https://www.marinabaysands.com/museum/exhibitions/van-gogh-the-immersive-experience.html',
-    name: 'Van Gogh: The Immersive Experience',
-    address: 'Resorts World Sentosa',
-    lat: 1.2540,
-    lng: 103.8238,
-    starts_at: '2026-01-15T10:00:00+08:00',
-    ends_at: '2026-06-30T20:00:00+08:00',
-    cuisine_tags: ['experience', 'exhibition', 'art'],
-    vibe_tags: ['cozy', 'celebratory'],
-    photo_url: null,
-    budget_band: 3,
-  },
-
-  // -- NHB / National Museum of Singapore ----------------------------------
-  // JS-rendered; scraped dates verified manually from nhb.gov.sg.
-  {
-    source_id: 'nms-once-upon-a-tide-2026',
-    source_url: 'https://www.nhb.gov.sg/nationalmuseum/whats-on/exhibition/once-upon-a-tide',
-    name: "Once Upon a Tide: Singapore's Journey from Settlement to Global City",
-    address: 'National Museum of Singapore, 93 Stamford Rd',
-    lat: 1.2966,
-    lng: 103.8481,
-    starts_at: '2025-05-24',
-    ends_at: '2026-10-09',
-    cuisine_tags: ['experience', 'exhibition', 'history'],
-    vibe_tags: ['low_key'],
-    photo_url: null,
-    budget_band: 1,
-    hours: {
-      mon: [{ open: '1000', close: '1900' }],
-      tue: [{ open: '1000', close: '1900' }],
-      wed: [{ open: '1000', close: '1900' }],
-      thu: [{ open: '1000', close: '1900' }],
-      fri: [{ open: '1000', close: '1900' }],
-      sat: [{ open: '1000', close: '1900' }],
-      sun: [{ open: '1000', close: '1900' }],
-    },
-  },
-
-  // -- Other curated picks --------------------------------------------------
-  {
-    source_id: 'gardens-flower-dome-2026',
-    source_url: 'https://www.gardensbythebay.com.sg/things-to-do/attractions/flower-dome.html',
-    name: 'Flower Dome -- Gardens by the Bay',
-    address: '18 Marina Gardens Dr',
-    lat: 1.2839,
-    lng: 103.8638,
-    starts_at: '2026-01-01T09:00:00+08:00',
-    ends_at: '2026-12-31T21:00:00+08:00',
-    cuisine_tags: ['experience', 'nature', 'outdoor'],
-    vibe_tags: ['cozy', 'low_key'],
-    photo_url: null,
-    is_outdoor: false,
-    budget_band: 2,
-  },
-  {
-    source_id: 'esplanade-current-2026',
-    source_url: 'https://www.esplanade.com/whats-on',
-    name: 'Esplanade -- Theatres on the Bay',
-    address: '1 Esplanade Drive',
-    lat: 1.2897,
-    lng: 103.8559,
-    starts_at: '2026-01-01T19:00:00+08:00',
-    ends_at: '2026-12-31T22:00:00+08:00',
-    cuisine_tags: ['experience', 'music', 'arts'],
-    vibe_tags: ['celebratory'],
-    photo_url: null,
-    budget_band: 3,
-  },
-]
+// This array is intentionally empty. Add entries here only for venues that:
+//   - have no live scraper and no API feed
+//   - are not covered by the museum agent
+//   - have a verifiable official source_url and end date
+export const EDITORIAL_EVENTS: EditorialEvent[] = []
 
 const CLOSING_SOON_DAYS = 30
 
