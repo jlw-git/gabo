@@ -205,7 +205,7 @@ function filterInMemory(all: Venue[], profile: Profile, overrides: string[]): Ve
   })
 }
 
-function emptyMeta(source: VenueSource, total: number) {
+function emptyMeta(source: 'supabase', total: number) {
   return {
     source,
     candidates_total: total,

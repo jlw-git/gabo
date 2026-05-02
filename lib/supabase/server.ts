@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 
 export async function createClient() {
@@ -18,10 +19,19 @@ export async function createClient() {
               cookieStore.set(name, value, options)
             )
           } catch {
-            // setAll called from a Server Component — safe to ignore when middleware refreshes the session.
+            // setAll called from a Server Component — safe to ignore.
           }
         },
       },
     }
   )
+}
+
+// Bypasses RLS. Use only in server-side admin/cron routes, never in
+// code paths reachable by end users.
+export function createServiceRoleClient() {
+  const url = process.env.SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) throw new Error('SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing')
+  return createSupabaseClient(url, key, { auth: { persistSession: false } })
 }
