@@ -2,7 +2,6 @@ import { isEvent } from '@/lib/planner/category'
 import { scoreWithoutEtas } from '@/lib/planner/score'
 import type { PlanCard, Profile, Venue } from '@/lib/planner/types'
 import { createClient } from '@/lib/supabase/server'
-import { catalog } from '@/lib/venues/catalog'
 
 // Lightweight recommendations endpoint for the search-form home view.
 // No routing, no profile required — surfaces this week's most relevant picks
@@ -44,17 +43,10 @@ export async function GET() {
 }
 
 async function loadVenues(): Promise<Venue[]> {
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
-    return catalog.filter((v) => v.active)
-  }
-  try {
-    const supabase = await createClient()
-    const { data, error } = await supabase.from('venues').select('*').eq('active', true)
-    if (error) throw new Error(error.message)
-    return (data ?? []) as Venue[]
-  } catch {
-    return catalog.filter((v) => v.active)
-  }
+  const supabase = await createClient()
+  const { data, error } = await supabase.from('venues').select('*').eq('active', true)
+  if (error) throw new Error(error.message)
+  return (data ?? []) as Venue[]
 }
 
 function pickTrending(venues: Venue[]): Venue[] {
@@ -87,7 +79,6 @@ function pickLimited(venues: Venue[], now: Date): Venue[] {
       if (typeof ends !== 'string') return true
       const t = new Date(ends).getTime()
       // Surface anything ending within the next two weeks. Past dates are
-      // still listed so the demo doesn't go empty if the catalog is stale.
       return !Number.isFinite(t) || t <= horizon || t >= now.getTime()
     })
     .sort((a, b) => {

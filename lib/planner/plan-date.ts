@@ -11,7 +11,6 @@ import {
 } from '@/lib/planner/score'
 import type { LatLng, Profile, Venue } from '@/lib/planner/types'
 import { createClient } from '@/lib/supabase/server'
-import { catalog } from '@/lib/venues/catalog'
 import { fetchWeatherCondition, type WeatherResult } from '@/lib/weather'
 
 // Cap on how many candidates we route after hard-filtering. Each survivor
@@ -20,11 +19,9 @@ import { fetchWeatherCondition, type WeatherResult } from '@/lib/weather'
 const ROUTING_CANDIDATE_CAP = 24
 const ROUTING_CONCURRENCY = 5
 
-type VenueSource = 'supabase' | 'catalog' | 'catalog-fallback'
-
 type VenueLoadResult = {
   venues: Venue[]
-  source: VenueSource
+  source: 'supabase'
   fallback_reason?: string
 }
 
@@ -152,19 +149,7 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
 }
 
 async function loadVenuesWithFallback(profile: Profile, overrides: string[]): Promise<VenueLoadResult> {
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
-    return { venues: filterInMemory(catalog, profile, overrides), source: 'catalog' }
-  }
-  try {
-    return { venues: await loadFromSupabase(profile, overrides), source: 'supabase' }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'unknown supabase error'
-    return {
-      venues: filterInMemory(catalog, profile, overrides),
-      source: 'catalog-fallback',
-      fallback_reason: message,
-    }
-  }
+  return { venues: await loadFromSupabase(profile, overrides), source: 'supabase' }
 }
 
 async function loadFromSupabase(profile: Profile, overrides: string[]): Promise<Venue[]> {

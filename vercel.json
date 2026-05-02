@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/sync-events",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/sync-eatbook",
+      "schedule": "0 7 * * 1"
     }
   ]
 }

@@ -1,14 +1,12 @@
 import { NextRequest } from 'next/server'
-import { syncEventsCatalog } from '@/lib/sources/events-sync'
+import { syncEatbookNewOpenings } from '@/lib/sources/eatbook-rss'
 
-// Refreshes the events catalog from Bandsintown (concerts) + SAM/NGS scrapers
-// + editorial (ArtScience, NHB, Gardens, Esplanade). Daily cron.
-// Run manually: curl -H "Authorization: Bearer $CRON_TOKEN" https://<host>/api/cron/sync-events
-//
-// maxDuration bumped to 300s: NGS scraper fetches up to 20 detail pages in
-// parallel, which can take 15–30 s on cold starts.
+// Discovers new Singapore restaurant openings via Eatbook RSS feeds, resolves
+// them through Google Places, and inserts genuinely new venues with
+// badge:'soft_launch'. Weekly cron (Mon 07:00 UTC, after dining sync).
+// Run manually: curl -H "Authorization: Bearer $CRON_TOKEN" https://<host>/api/cron/sync-eatbook
 
-export const maxDuration = 300
+export const maxDuration = 120
 
 export async function GET(request: NextRequest) {
   const expected = process.env.CRON_TOKEN
@@ -20,7 +18,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const summary = await syncEventsCatalog()
+    const summary = await syncEatbookNewOpenings()
     return Response.json(summary)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error'

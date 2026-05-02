@@ -1,11 +1,11 @@
 import { fetchDriveRoute } from '@/lib/onemap/client'
 import { cacheStats } from '@/lib/onemap/cache'
 import { mapWithConcurrency } from '@/lib/async/pool'
-import { catalog } from '@/lib/venues/catalog'
+import { createClient } from '@/lib/supabase/server'
 import type { LatLng } from '@/lib/planner/types'
 
-// Warm the OneMap drive-route cache with every (common start × venue) pair
-// so the first plan from a popular start doesn't pay routing latency.
+// Warm the OneMap drive-route cache with every (popular start x active venue)
+// pair so the first plan from a common start doesn't pay routing latency.
 //   curl -X POST http://localhost:3000/api/prewarm
 // Optionally protect with PREWARM_TOKEN.
 
@@ -29,9 +29,21 @@ export async function POST(request: Request) {
     }
   }
 
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('venues')
+    .select('lat,lng')
+    .eq('active', true)
+
+  if (error) {
+    return Response.json({ error: error.message }, { status: 500 })
+  }
+
+  const venues = (data ?? []) as { lat: number; lng: number }[]
+
   const pairs: { origin: LatLng; destination: LatLng }[] = []
   for (const start of POPULAR_STARTS) {
-    for (const v of catalog) {
+    for (const v of venues) {
       pairs.push({ origin: start, destination: { lat: v.lat, lng: v.lng } })
     }
   }
