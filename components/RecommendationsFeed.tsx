@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { PlanCard as PlanCardType, Profile, TransitMode } from '@/lib/planner/types'
-import { isEvent } from '@/lib/planner/category'
 import { bookingUrl } from '@/lib/booking-url'
 import { loadShortlist, logShortlistEvent, saveShortlist } from '@/lib/shortlist-storage'
 import { PlanCard } from './PlanCard'
@@ -19,32 +18,44 @@ type Props = {
   profile: Profile
 }
 
-const SECTIONS: { key: keyof Recommendations; title: string; subtitle: string; icon: string }[] = [
-  {
-    key: 'limited',
-    title: 'Catch before it ends',
-    subtitle: 'Pop-ups closing soon. See them while you can.',
-    icon: '⏳',
-  },
-  {
-    key: 'new',
-    title: 'Just opened',
-    subtitle: 'Newly opened spots. Be among the first.',
-    icon: '✨',
-  },
-  {
-    key: 'trending',
-    title: 'Trending this week',
-    subtitle: 'What everyone’s talking about across the island.',
-    icon: '🔥',
-  },
+type Tab = 'dining' | 'events'
+type Filter = 'all' | 'recommended' | 'limited' | 'new' | 'shortlist'
+
+const TABS: { key: Tab; label: string; icon: string }[] = [
+  { key: 'dining', label: 'Dining', icon: '🍽️' },
+  { key: 'events', label: 'Events', icon: '🎟️' },
 ]
 
-// Pre-search recommendations rendered on the home / form view. No ETAs since
-// no start points exist yet — cards skip the FairnessPill automatically.
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'recommended', label: 'Recommended' },
+  { key: 'limited', label: 'Limited-run' },
+  { key: 'new', label: 'Just opened' },
+  { key: 'shortlist', label: '★ Shortlist' },
+]
+
+function applyFilter(cards: PlanCardType[], filter: Filter, shortlist: Set<string>): PlanCardType[] {
+  switch (filter) {
+    case 'all':
+      return cards
+    case 'recommended':
+      return cards.filter(
+        (c) => c.badge === 'critic_pick' || c.badge === 'award_fresh' || c.trending_score >= 0.7
+      )
+    case 'limited':
+      return cards.filter((c) => c.badge === 'closing_soon')
+    case 'new':
+      return cards.filter((c) => c.badge === 'soft_launch')
+    case 'shortlist':
+      return cards.filter((c) => shortlist.has(c.id))
+  }
+}
+
 export function RecommendationsFeed({ profile }: Props) {
   const [recs, setRecs] = useState<Recommendations | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [tab, setTab] = useState<Tab>('dining')
+  const [filter, setFilter] = useState<Filter>('all')
   const [details, setDetails] = useState<PlanCardType | null>(null)
   const [shared, setShared] = useState<PlanCardType | null>(null)
   const [shortlist, setShortlist] = useState<Set<string>>(new Set())
@@ -75,7 +86,6 @@ export function RecommendationsFeed({ profile }: Props) {
         next.delete(card.id)
       } else {
         next.add(card.id)
-        // Log additions only — measure save velocity, not toggle churn.
         logShortlistEvent(card.id)
       }
       saveShortlist([...next])
@@ -83,37 +93,71 @@ export function RecommendationsFeed({ profile }: Props) {
     })
   }
 
-  if (error) return null
-  if (!recs) {
-    return (
-      <div className="space-y-4">
-        {SECTIONS.map((s) => (
-          <div key={s.key} className="space-y-2">
-            <div className="h-5 w-40 animate-pulse rounded bg-stone-200" />
-            <div className="-mx-4 flex gap-3 overflow-hidden px-4">
-              {[0, 1].map((i) => (
-                <div
-                  key={i}
-                  className="h-64 w-[84vw] max-w-[320px] flex-shrink-0 animate-pulse rounded-2xl bg-white/60 ring-1 ring-stone-200"
-                />
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    )
-  }
+  // Flatten and deduplicate across sections. limited first so closing_soon
+  // badge is preserved when a venue appears in multiple sections.
+  const allCards = useMemo(() => {
+    if (!recs) return []
+    const seen = new Set<string>()
+    const out: PlanCardType[] = []
+    for (const c of [...recs.limited, ...recs.new, ...recs.trending]) {
+      if (!seen.has(c.id)) {
+        seen.add(c.id)
+        out.push(c)
+      }
+    }
+    return out
+  }, [recs])
 
-  const allCards = [...recs.limited, ...recs.new, ...recs.trending]
-  const allHaveZeroResults = allCards.length === 0
-  if (allHaveZeroResults) return null
+  const diningCards = useMemo(() => allCards.filter((c) => c.bucket === 'dining'), [allCards])
+  const eventsCards = useMemo(() => allCards.filter((c) => c.bucket === 'event'), [allCards])
+  const tabCards = tab === 'dining' ? diningCards : eventsCards
+  const activeCards = useMemo(
+    () => applyFilter(tabCards, filter, shortlist),
+    [tabCards, filter, shortlist]
+  )
+  const shortlistCount = useMemo(
+    () => allCards.filter((c) => shortlist.has(c.id)).length,
+    [allCards, shortlist]
+  )
 
   const defaultMode: TransitMode = profile.transit_pref === 'mrt' ? 'transit' : 'drive'
   const plannerLabel = profile.planner_name?.trim() || 'You'
   const partnerLabel = profile.partner_name?.trim() || 'Partner'
 
+  if (error) return null
+
+  if (!recs) {
+    return (
+      <div className="space-y-5">
+        <div className="border-t border-stone-200 pt-7">
+          <div className="h-6 w-48 animate-pulse rounded bg-stone-200" />
+          <div className="mt-1.5 h-4 w-72 animate-pulse rounded bg-stone-100" />
+        </div>
+        <div className="h-9 w-64 animate-pulse rounded-full bg-stone-100" />
+        <div className="flex gap-2">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="h-8 w-20 animate-pulse rounded-full bg-stone-100" />
+          ))}
+        </div>
+        <div className="space-y-3 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="h-64 animate-pulse rounded-2xl bg-white/60 ring-1 ring-stone-200"
+            />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (allCards.length === 0) return null
+
+  const otherTabHasContent =
+    (tab === 'dining' ? eventsCards.length : diningCards.length) > 0
+
   return (
-    <div className="space-y-7">
+    <div className="space-y-5">
       <div className="flex items-end justify-between gap-3 border-t border-stone-200 pt-7">
         <div className="space-y-1">
           <h2 className="text-lg font-semibold tracking-tight">Right now in Singapore</h2>
@@ -123,45 +167,134 @@ export function RecommendationsFeed({ profile }: Props) {
         </div>
       </div>
 
-      {SECTIONS.map((section) => {
-        const cards = recs[section.key].slice(0, 3)
-        if (cards.length === 0) return null
-        return (
-          <section key={section.key}>
-            <div className="mb-2 flex items-center gap-2 px-1">
-              <span aria-hidden="true">{section.icon}</span>
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold tracking-tight">{section.title}</h3>
-                <p className="text-xs text-stone-500">{section.subtitle}</p>
-              </div>
-            </div>
-            <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mx-0 md:grid md:snap-none md:grid-cols-3 md:overflow-visible md:px-0">
-              {cards.map((card) => (
-                <div
-                  key={card.id}
-                  className="w-[84vw] max-w-[320px] flex-shrink-0 snap-start md:w-auto md:max-w-none md:flex-shrink"
+      {/* Dining / Events tabs */}
+      <div
+        role="tablist"
+        aria-label="Category"
+        className="inline-flex rounded-full bg-stone-100 p-1 ring-1 ring-stone-200"
+      >
+        {TABS.map((t) => {
+          const count = t.key === 'dining' ? diningCards.length : eventsCards.length
+          const on = t.key === tab
+          return (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              onClick={() => setTab(t.key)}
+              className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                on
+                  ? 'bg-white text-stone-900 shadow-sm ring-1 ring-stone-200'
+                  : 'text-stone-500 hover:text-stone-800'
+              }`}
+            >
+              <span aria-hidden="true">{t.icon}</span>
+              <span>{t.label}</span>
+              <span
+                className={`ml-1 rounded-full px-1.5 text-[10px] font-bold ${
+                  on ? 'bg-rose-100 text-rose-700' : 'bg-stone-200 text-stone-600'
+                }`}
+              >
+                {count}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Filter chips */}
+      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {FILTERS.map((f) => {
+          const on = f.key === filter
+          const showCount = f.key === 'shortlist' && shortlistCount > 0
+          return (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setFilter(f.key)}
+              className={`flex-shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+                on
+                  ? 'bg-stone-900 text-white ring-stone-900'
+                  : 'bg-white text-stone-700 ring-stone-200 hover:bg-stone-50'
+              }`}
+            >
+              {f.label}
+              {showCount && (
+                <span
+                  className={`ml-1.5 rounded-full px-1.5 text-[10px] ${
+                    on ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-700'
+                  }`}
                 >
-                  <PlanCard
-                    card={card}
-                    profile={profile}
-                    defaultMode={defaultMode}
-                    plannerLabel={plannerLabel}
-                    partnerLabel={partnerLabel}
-                    shortlisted={shortlist.has(card.id)}
-                    onBook={() => {
-                      // No booking flow on the home view — open details instead.
-                      setDetails(card)
-                    }}
-                    onOpenDetails={(c) => setDetails(c)}
-                    onShare={(c) => setShared(c)}
-                    onToggleShortlist={toggleShortlist}
-                  />
-                </div>
-              ))}
-            </div>
-          </section>
-        )
-      })}
+                  {shortlistCount}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Card grid or empty state */}
+      {activeCards.length === 0 ? (
+        <div className="rounded-2xl bg-white p-5 ring-1 ring-stone-200">
+          <h3 className="text-sm font-semibold tracking-tight text-stone-900">
+            {filter === 'shortlist'
+              ? 'Nothing saved yet.'
+              : filter === 'limited'
+              ? 'No closing-soon picks right now.'
+              : filter === 'new'
+              ? 'No new openings at the moment.'
+              : filter === 'recommended'
+              ? 'No critic or trending picks here yet.'
+              : tab === 'dining'
+              ? 'No dining picks at the moment.'
+              : 'No events on at the moment.'}
+          </h3>
+          <p className="mt-1 text-sm text-stone-600">
+            {filter === 'shortlist'
+              ? 'Tap ☆ on any card to save it here.'
+              : 'Try a different filter or switch tabs.'}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {filter !== 'all' && (
+              <button
+                type="button"
+                onClick={() => setFilter('all')}
+                className="rounded-full bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800"
+              >
+                Show all
+              </button>
+            )}
+            {otherTabHasContent && (
+              <button
+                type="button"
+                onClick={() => setTab(tab === 'dining' ? 'events' : 'dining')}
+                className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 ring-1 ring-stone-300 hover:bg-stone-50"
+              >
+                Switch to {tab === 'dining' ? 'Events' : 'Dining'}
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 lg:grid-cols-3">
+          {activeCards.map((card) => (
+            <PlanCard
+              key={card.id}
+              card={card}
+              profile={profile}
+              defaultMode={defaultMode}
+              plannerLabel={plannerLabel}
+              partnerLabel={partnerLabel}
+              shortlisted={shortlist.has(card.id)}
+              onBook={() => setDetails(card)}
+              onOpenDetails={(c) => setDetails(c)}
+              onShare={(c) => setShared(c)}
+              onToggleShortlist={toggleShortlist}
+            />
+          ))}
+        </div>
+      )}
 
       {details && (
         <VenueDetailModal
@@ -174,8 +307,6 @@ export function RecommendationsFeed({ profile }: Props) {
           onShare={(c) => setShared(c)}
           onToggleShortlist={toggleShortlist}
           onBook={() => {
-            // Reuse share flow for "Get tickets / Reserve" from the home view —
-            // there's no scheduledFor here yet, so we just hand off the link.
             setDetails(null)
             window.open(bookingUrl(details), '_blank', 'noopener,noreferrer')
           }}
@@ -200,6 +331,3 @@ function defaultScheduledFor(): Date {
   d.setHours(19, 30, 0, 0)
   return d
 }
-
-// Suppress an unused import in environments that strip it.
-void isEvent
