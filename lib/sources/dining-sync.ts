@@ -5,7 +5,7 @@
 //
 // Run via /api/cron/sync-dining (scheduled in vercel.json) or manually.
 
-import { createClient } from '@/lib/supabase/server'
+import { createServiceRoleClient } from '@/lib/supabase/server'
 import {
   GooglePlacesAuthError,
   GooglePlacesQuotaError,
@@ -142,8 +142,9 @@ export async function syncDiningCatalog(): Promise<DiningSyncSummary> {
   const deduped = [...byKey.values()]
   summary.after_dedup = deduped.length
 
-  // Upsert into Supabase.
-  const supabase = await createClient()
+  // Upsert into Supabase. Service role bypasses RLS — sync routes are
+  // already protected by CRON_TOKEN.
+  const supabase = createServiceRoleClient()
   const chunkSize = 50
   for (let i = 0; i < deduped.length; i += chunkSize) {
     const chunk = deduped.slice(i, i + chunkSize)

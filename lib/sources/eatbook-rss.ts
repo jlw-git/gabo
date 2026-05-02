@@ -14,7 +14,7 @@
 // Does NOT upsert existing rows — existing badges/scores are preserved.
 
 import * as cheerio from 'cheerio'
-import { createClient } from '@/lib/supabase/server'
+import { createServiceRoleClient } from '@/lib/supabase/server'
 import {
   GooglePlacesAuthError,
   GooglePlacesQuotaError,
@@ -189,7 +189,7 @@ export async function syncEatbookNewOpenings(): Promise<EatbookSyncSummary> {
   if (resolved.length === 0) return summary
 
   // Step 4: check which Place IDs are already in the venues table
-  const supabase = await createClient()
+  const supabase = createServiceRoleClient()
   const candidateIds = resolved.map(v => v.source_id)
   const { data: existing } = await supabase
     .from('venues')

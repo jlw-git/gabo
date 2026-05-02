@@ -274,7 +274,7 @@ export function museumEventToVenue(e: EditorialEvent): Omit<Venue, 'id'> & {
     hours_json: e.hours ?? null,
     ph_hours_json: null,
     badge: closingSoon ? 'closing_soon' : 'none',
-    badge_meta: closingSoon ? { ends_at: e.ends_at, reason: 'official end date' } : null,
+    badge_meta: { ends_at: e.ends_at, reason: 'official end date' },
     trending_score: 0,
     active: daysUntilEnd >= -1,
     source: 'museum',

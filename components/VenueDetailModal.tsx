@@ -95,7 +95,7 @@ export function VenueDetailModal({
         <div className="relative h-56 w-full bg-stone-100">
           {card.photo_url && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={card.photo_url} alt={card.name} className="h-full w-full object-cover" />
+            <img src={card.photo_url} alt={card.name} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
           )}
           <div className="absolute right-3 top-3 flex gap-2">
             {onToggleShortlist && (
@@ -226,7 +226,7 @@ export function VenueDetailModal({
                     <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-stone-200">
                       {c.photo_url && (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={c.photo_url} alt="" className="h-full w-full object-cover" />
+                        <img src={c.photo_url} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -250,7 +250,7 @@ export function VenueDetailModal({
               {primaryCta}
             </button>
             <a
-              href={directionsUrl({ lat: card.lat, lng: card.lng, name: card.name })}
+              href={directionsUrl({ lat: card.lat, lng: card.lng, name: card.name, address: card.address })}
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-stone-700 ring-1 ring-stone-300 transition hover:bg-stone-50 hover:text-stone-900 active:scale-[0.98]"

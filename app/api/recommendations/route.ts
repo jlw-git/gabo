@@ -10,7 +10,7 @@ import { createClient } from '@/lib/supabase/server'
 
 const PER_LIST_LIMIT = 6
 const NEW_OPENING_DAYS = 90
-const LIMITED_RUN_DAYS = 14
+const LIMITED_RUN_DAYS = 30
 
 type Collection = {
   key: 'trending' | 'new' | 'limited'
@@ -31,7 +31,7 @@ const NEUTRAL_PROFILE: Profile = {
 export async function GET() {
   const venues = await loadVenues()
   const now = new Date()
-  const trending = pickTrending(venues)
+  const trending = pickTrending(venues, now)
   const newOpenings = pickNew(venues, now)
   const limited = pickLimited(venues, now)
 
@@ -49,9 +49,19 @@ async function loadVenues(): Promise<Venue[]> {
   return (data ?? []) as Venue[]
 }
 
-function pickTrending(venues: Venue[]): Venue[] {
+function pickTrending(venues: Venue[], now: Date): Venue[] {
   return [...venues]
-    .filter((v) => v.trending_score >= 0.55 || v.badge === 'critic_pick' || v.badge === 'award_fresh')
+    .filter((v) => {
+      if (v.trending_score >= 0.55 || v.badge === 'critic_pick' || v.badge === 'award_fresh') return true
+      // Surface all upcoming events even if trending_score is 0 — they're
+      // time-bounded so any future exhibition is relevant.
+      if (isEvent(v)) {
+        const ends = v.badge_meta?.ends_at
+        if (!ends) return true
+        return new Date(ends) > now
+      }
+      return false
+    })
     .sort((a, b) => b.trending_score - a.trending_score)
     .slice(0, PER_LIST_LIMIT)
 }

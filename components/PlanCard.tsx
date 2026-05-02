@@ -67,7 +67,7 @@ export function PlanCard({
       <div className="relative h-40 w-full bg-stone-100">
         {card.photo_url && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={card.photo_url} alt={card.name} className="h-full w-full object-cover" />
+          <img src={card.photo_url} alt={card.name} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
         )}
         <div className="absolute right-3 top-3 flex flex-col items-end gap-1.5">
           {badgeCopy && (
@@ -163,7 +163,7 @@ export function PlanCard({
             {primaryCta}
           </button>
           <a
-            href={directionsUrl({ lat: card.lat, lng: card.lng, name: card.name })}
+            href={directionsUrl({ lat: card.lat, lng: card.lng, name: card.name, address: card.address })}
             target="_blank"
             rel="noopener noreferrer"
             onClick={stop}
@@ -306,10 +306,12 @@ function whyTail(card: PlanCardType): string | null {
     }
     case 'none':
     default:
-      // Trending venues with no other badge get a trending-flavoured tail.
-      // Real product would surface aggregated saves/searches; for the demo
-      // we map the seeded score to a qualitative band — no fake numbers.
       if (card.trending_score >= TRENDING_THRESHOLD) return trendingTail(card.trending_score)
+      // For events, surface the end date even without a closing_soon badge.
+      if (isEvent(card)) {
+        const fmt = formatEndsAt(card.badge_meta?.ends_at as string | undefined)
+        if (fmt) return `on view until ${fmt}`
+      }
       return null
   }
 }

@@ -14,7 +14,7 @@
 // the Maps Platform GOOGLE_PLACES_API_KEY)
 
 import { GoogleGenAI } from '@google/genai'
-import { createClient } from '@/lib/supabase/server'
+import { createServiceRoleClient } from '@/lib/supabase/server'
 import type { HoursJson } from '@/lib/planner/types'
 import { editorialEventToVenue, type EditorialEvent } from './editorial-events'
 
@@ -203,7 +203,7 @@ export async function runMuseumAgent(): Promise<MuseumAgentSummary> {
     errors: [],
   }
 
-  const supabase = await createClient()
+  const supabase = createServiceRoleClient()
 
   // Step 0: Delete legacy hackathon-era editorial rows that were never
   // verified against real sources. Safe to re-run (no-op if already gone).
