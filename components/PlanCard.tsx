@@ -2,6 +2,7 @@ import type { LatLng, PlanCard as PlanCardType, Profile, TransitMode } from '@/l
 import { isEvent } from '@/lib/planner/category'
 import { directionsUrl } from '@/lib/directions'
 import { photoUrlOrFallback } from '@/lib/photo-fallback'
+import { acceptsReservations } from '@/lib/reservations'
 import { FairnessPill } from './FairnessPill'
 import { SourceAttribution } from './SourceAttribution'
 
@@ -46,6 +47,8 @@ export function PlanCard({
   const showTrending = card.badge === 'none' && card.trending_score >= TRENDING_THRESHOLD
   const ring = ringForBadge(card)
   const primaryCta = event ? 'Get tickets' : 'Reserve'
+  // Hawker / food-court venues don't take reservations — show Directions only.
+  const showPrimaryCta = event || acceptsReservations(card)
 
   function stop(e: React.MouseEvent | React.KeyboardEvent) {
     e.stopPropagation()
@@ -164,21 +167,27 @@ export function PlanCard({
         </p>
 
         <div className="flex gap-2 pt-1" onClick={stop}>
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onBook(card)
-            }}
-            className="flex-1 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.98]"
-          >
-            {primaryCta}
-          </button>
+          {showPrimaryCta && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onBook(card)
+              }}
+              className="flex-1 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.98]"
+            >
+              {primaryCta}
+            </button>
+          )}
           <a
             href={directionsUrl({ lat: card.lat, lng: card.lng, name: card.name, address: card.address, source: card.source, source_id: card.source_id })}
             target="_blank"
             rel="noopener noreferrer"
             onClick={stop}
-            className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 ring-1 ring-stone-300 transition hover:bg-stone-50 hover:text-stone-900 active:scale-[0.98]"
+            className={
+              showPrimaryCta
+                ? 'rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 ring-1 ring-stone-300 transition hover:bg-stone-50 hover:text-stone-900 active:scale-[0.98]'
+                : 'flex-1 rounded-xl bg-stone-900 px-4 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.98]'
+            }
             aria-label={`Get directions to ${card.name}`}
           >
             Directions

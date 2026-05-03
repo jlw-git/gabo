@@ -5,6 +5,7 @@ import type { DayKey, HoursWindow, PlanCard as PlanCardType, Profile, TransitMod
 import { isEvent } from '@/lib/planner/category'
 import { directionsUrl } from '@/lib/directions'
 import { photoUrlOrFallback } from '@/lib/photo-fallback'
+import { acceptsReservations } from '@/lib/reservations'
 import { FairnessPill } from './FairnessPill'
 import { SourceAttribution } from './SourceAttribution'
 import { VenueMiniMap } from './VenueMiniMap'
@@ -72,6 +73,7 @@ export function VenueDetailModal({
   const partnerLabel = profile.partner_name?.trim() || 'Partner'
   const showFairness = card.eta_a_min > 0 || card.eta_b_min > 0
   const primaryCta = event ? 'Get tickets' : 'Reserve'
+  const showPrimaryCta = event || acceptsReservations(card)
 
   const crossRecs = useMemo(() => {
     if (!allCards || !onSelectCrossRec) return []
@@ -263,17 +265,23 @@ export function VenueDetailModal({
           )}
 
           <div className="flex gap-2 pt-1">
-            <button
-              onClick={() => onBook(card)}
-              className="flex-1 rounded-xl bg-stone-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.98]"
-            >
-              {primaryCta}
-            </button>
+            {showPrimaryCta && (
+              <button
+                onClick={() => onBook(card)}
+                className="flex-1 rounded-xl bg-stone-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.98]"
+              >
+                {primaryCta}
+              </button>
+            )}
             <a
               href={directionsUrl({ lat: card.lat, lng: card.lng, name: card.name, address: card.address, source: card.source, source_id: card.source_id })}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-stone-700 ring-1 ring-stone-300 transition hover:bg-stone-50 hover:text-stone-900 active:scale-[0.98]"
+              className={
+                showPrimaryCta
+                  ? 'rounded-xl bg-white px-4 py-3 text-sm font-semibold text-stone-700 ring-1 ring-stone-300 transition hover:bg-stone-50 hover:text-stone-900 active:scale-[0.98]'
+                  : 'flex-1 rounded-xl bg-stone-900 px-4 py-3 text-center text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.98]'
+              }
               aria-label={`Get directions to ${card.name}`}
             >
               Directions

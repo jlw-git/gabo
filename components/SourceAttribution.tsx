@@ -16,12 +16,33 @@ const LABELS: Record<VenueSource, string> = {
   manual: '',
 }
 
+// Editorial rows come from a small known set of food blogs — show which one.
+// Falls back to the generic "editor's pick" if we don't recognise the host.
+const EDITORIAL_HOSTS: Record<string, string> = {
+  'sethlui.com': 'via Seth Lui',
+  'danielfooddiary.com': 'via Daniel Food Diary',
+  'misstamchiak.com': 'via Miss Tam Chiak',
+  'ladyironchef.com': 'via Ladyironchef',
+  'eatbook.sg': 'via Eatbook',
+}
+
+function editorialLabelForUrl(url: string | null | undefined): string | null {
+  if (!url) return null
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '')
+    return EDITORIAL_HOSTS[host] ?? null
+  } catch {
+    return null
+  }
+}
+
 // Compact attribution chip. Per Google's & Foursquare's TOS we must show
 // where data was sourced from; the editorial badge is our own honesty
 // surface so users can tell hand-curated picks apart from API-fed rows.
 export function SourceAttribution({ source, sourceUrl, className = '' }: Props) {
   if (!source || source === 'manual') return null
-  const label = LABELS[source]
+  const label =
+    source === 'editorial' ? (editorialLabelForUrl(sourceUrl) ?? LABELS.editorial) : LABELS[source]
   if (!label) return null
 
   const inner = <span className="text-[10px] font-medium uppercase tracking-wider text-stone-500">{label}</span>
