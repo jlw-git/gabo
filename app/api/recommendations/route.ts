@@ -57,7 +57,7 @@ function pickTrending(venues: Venue[], now: Date): Venue[] {
       // time-bounded so any future exhibition is relevant.
       if (isEvent(v)) {
         const ends = v.badge_meta?.ends_at
-        if (!ends) return true
+        if (typeof ends !== 'string' && typeof ends !== 'number') return true
         return new Date(ends) > now
       }
       return false

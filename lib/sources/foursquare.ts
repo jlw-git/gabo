@@ -119,7 +119,7 @@ function toHoursJson(periods: RawHours[]): HoursJson {
   return out
 }
 
-function photoUrl(p: RawPlace['photos'] extends (infer T)[] | undefined ? T : never | undefined): string | undefined {
+function photoUrl(p: { prefix?: string; suffix?: string } | undefined): string | undefined {
   if (!p?.prefix || !p?.suffix) return undefined
   return `${p.prefix}800x600${p.suffix}`
 }

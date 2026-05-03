@@ -39,7 +39,7 @@ export async function countRedditMentions(venueName: string): Promise<RedditCoun
   const cutoff = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60
   const posts = children
     .map((c) => c.data)
-    .filter((d): d is RedditPost => Boolean(d) && typeof d.created_utc === 'number' && d.created_utc >= cutoff)
+    .filter((d): d is RedditPost => d != null && typeof d.created_utc === 'number' && d.created_utc >= cutoff)
     .map((d) => ({
       title: d.title ?? '',
       permalink: d.permalink ?? '',
