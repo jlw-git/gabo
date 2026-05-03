@@ -1,29 +1,38 @@
-// Foursquare Places API (v3) client — fallback for when Google Places quota
-// is exhausted. Free tier: 1,000 calls/day, no card required.
+// Foursquare Places API client — fallback for when Google Places quota
+// is exhausted. Free tier: 1,000 calls/day, but the freePro tier can run
+// out of credits separately and require a top-up at
+// https://foursquare.com/developers/orgs.
 //
-// Docs: https://docs.foursquare.com/developer/reference/places-api-overview
+// The legacy /v3 endpoint at api.foursquare.com was deprecated in 2024;
+// we now use the places-api.foursquare.com host with Bearer auth and an
+// X-Places-Api-Version header. Field names changed too — fsq_place_id
+// instead of fsq_id, latitude/longitude on the result (not nested
+// under geocodes.main).
 //
-// Auth: Authorization header (their key, not Bearer-prefixed).
+// Docs: https://docs.foursquare.com/fsq-developers-places/reference/places-api-overview
 
 import type { DayKey, HoursJson, HoursWindow, Venue } from '@/lib/planner/types'
 
-const BASE = 'https://api.foursquare.com/v3'
+const BASE = 'https://places-api.foursquare.com'
+const API_VERSION = '2025-06-17'
 const SG_NEAR = 'Singapore,SG'
 
 export class FoursquareAuthError extends Error {}
 export class FoursquareQuotaError extends Error {}
 
 type RawPlace = {
-  fsq_id?: string
+  fsq_place_id?: string
   name?: string
   location?: { formatted_address?: string; address?: string; locality?: string }
-  geocodes?: { main?: { latitude?: number; longitude?: number } }
-  categories?: { id?: number; name?: string; short_name?: string }[]
+  latitude?: number
+  longitude?: number
+  categories?: { fsq_category_id?: string; name?: string; short_name?: string }[]
   price?: number
   rating?: number
-  hours?: { display?: string; is_local_holiday?: boolean; open_now?: boolean; regular?: RawHours[] }
+  hours?: { display?: string; regular?: RawHours[] }
   photos?: { prefix?: string; suffix?: string }[]
   link?: string
+  website?: string
 }
 
 type RawHours = {
@@ -57,13 +66,24 @@ export async function searchPlaces(query: string, limit = 20): Promise<Foursquar
   url.searchParams.set('query', query)
   url.searchParams.set('near', SG_NEAR)
   url.searchParams.set('limit', String(Math.min(limit, 50)))
-  url.searchParams.set('fields', 'fsq_id,name,location,geocodes,categories,price,rating,hours,photos,link')
+  url.searchParams.set(
+    'fields',
+    'fsq_place_id,name,location,latitude,longitude,categories,price,rating,hours,photos,link,website'
+  )
 
   const res = await fetch(url.toString(), {
-    headers: { Authorization: apiKey(), Accept: 'application/json' },
+    headers: {
+      Authorization: `Bearer ${apiKey()}`,
+      Accept: 'application/json',
+      'X-Places-Api-Version': API_VERSION,
+    },
   })
 
   if (res.status === 401) throw new FoursquareAuthError('Foursquare: 401 (bad key)')
+  if (res.status === 402)
+    throw new FoursquareQuotaError(
+      'Foursquare: 402 (no API credits — top up at foursquare.com/developers/orgs)'
+    )
   if (res.status === 429) throw new FoursquareQuotaError('Foursquare: 429 quota exceeded')
   if (!res.ok) throw new Error(`Foursquare search ${res.status}: ${await res.text().catch(() => '')}`)
 
@@ -74,10 +94,10 @@ export async function searchPlaces(query: string, limit = 20): Promise<Foursquar
 }
 
 function toFoursquarePlace(raw: RawPlace): FoursquarePlace | null {
-  const id = raw.fsq_id
+  const id = raw.fsq_place_id
   const name = raw.name
-  const lat = raw.geocodes?.main?.latitude
-  const lng = raw.geocodes?.main?.longitude
+  const lat = raw.latitude
+  const lng = raw.longitude
   if (!id || !name || typeof lat !== 'number' || typeof lng !== 'number') return null
 
   return {
@@ -91,9 +111,7 @@ function toFoursquarePlace(raw: RawPlace): FoursquarePlace | null {
     price_level: raw.price, // Foursquare returns 1..4 directly
     hours: raw.hours?.regular ? toHoursJson(raw.hours.regular) : null,
     photo_url: photoUrl(raw.photos?.[0]),
-    source_url: raw.link
-      ? `https://foursquare.com${raw.link}`
-      : `https://foursquare.com/v/${id}`,
+    source_url: raw.website ?? `https://foursquare.com/v/${id}`,
   }
 }
 

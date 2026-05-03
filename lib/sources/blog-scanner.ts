@@ -27,33 +27,59 @@ import { searchPlaces } from '@/lib/onemap/client'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 
 // ─── Blog registry ────────────────────────────────────────────────────────────
+//
+// Not all blogs have a working RSS feed. Each config has a `discover()` that
+// returns the article list however that blog publishes it:
+//   - rssFeed:  classic RSS 2.0 (Sethlui, Ladyironchef)
+//   - htmlListing: scrape <a> URLs from a category page (Daniel Food Diary —
+//     their /feed/ endpoint is permanently broken)
+//   - sitemapUrls: pull <loc> entries from sitemap.xml (Miss Tam Chiak — Gatsby
+//     SSG with no RSS plugin enabled)
+
+type RssItem = { title: string; url: string; pubDate: Date }
 
 type BlogConfig = {
   name: string
   prefix: string // short prefix for source_id, e.g. 'sethlui'
-  feed: string   // RSS 2.0 feed URL
+  discover: () => Promise<RssItem[]>
 }
 
 const BLOGS: BlogConfig[] = [
   {
     name: 'Seth Lui',
     prefix: 'sethlui',
-    feed: 'https://sethlui.com/feed/',
+    // Food-section feed only — the main /feed/ surfaces lots of non-food
+    // content (lifestyle guides, gift round-ups) that wastes Gemini calls.
+    discover: () => fetchFeedItems('https://sethlui.com/section/food/feed/'),
   },
   {
     name: 'Daniel Food Diary',
     prefix: 'dfd',
-    feed: 'https://danielfooddiary.com/feed/',
+    // Article URLs follow /YYYY/MM/DD/slug/ — pubDate is parseable from path.
+    discover: () =>
+      fetchHtmlListing(
+        'https://danielfooddiary.com/category/singapore/',
+        /^https:\/\/danielfooddiary\.com\/(\d{4})\/(\d{2})\/(\d{2})\/([^/]+)\/$/
+      ),
   },
   {
     name: 'Miss Tam Chiak',
     prefix: 'mtc',
-    feed: 'https://www.misstamchiak.com/feed/',
+    // Sitemap is roughly newest-first; we cap to MAX_ARTICLES_PER_BLOG via
+    // the main loop, so older entries simply never get processed.
+    discover: () =>
+      fetchSitemapItems('https://www.misstamchiak.com/sitemap-0.xml', (u) => {
+        // Reject homepage, paginated archive, category roots, tag pages.
+        const path = new URL(u).pathname
+        if (path === '/' || path === '') return false
+        if (/^\/(page|category|tag|author)\//.test(path)) return false
+        return true
+      }),
   },
   {
     name: 'Ladyironchef',
     prefix: 'lic',
-    feed: 'https://www.ladyironchef.com/feed/',
+    discover: () => fetchFeedItems('https://www.ladyironchef.com/feed/'),
   },
 ]
 
@@ -153,9 +179,7 @@ function slugify(name: string): string {
     .slice(0, 60)
 }
 
-// ─── RSS parsing ──────────────────────────────────────────────────────────────
-
-type RssItem = { title: string; url: string; pubDate: Date }
+// ─── Article discovery ───────────────────────────────────────────────────────
 
 async function fetchFeedItems(feedUrl: string): Promise<RssItem[]> {
   const xml = await fetch(feedUrl, fetchOpts()).then((r) => r.text())
@@ -172,6 +196,59 @@ async function fetchFeedItems(feedUrl: string): Promise<RssItem[]> {
     if (!title || !url || isNaN(pubDate.getTime())) return
     if (pubDate.getTime() < cutoff) return
     items.push({ title, url, pubDate })
+  })
+  return items
+}
+
+// Scrape <a href> URLs out of a category/listing HTML page. The pattern must
+// have YYYY/MM/DD as capture groups 1-3; pubDate is reconstructed from those.
+// Title falls back to the URL slug since this is post-regex now (the title
+// is just used in error messages and Gemini context).
+async function fetchHtmlListing(listingUrl: string, urlPattern: RegExp): Promise<RssItem[]> {
+  const html = await fetch(listingUrl, fetchOpts()).then((r) => r.text())
+  const $ = cheerio.load(html)
+  const cutoff = Date.now() - LOOKBACK_DAYS * 86_400_000
+  const seen = new Set<string>()
+  const items: RssItem[] = []
+  $('a[href]').each((_, el) => {
+    const href = $(el).attr('href') ?? ''
+    const m = href.match(urlPattern)
+    if (!m) return
+    if (seen.has(href)) return
+    seen.add(href)
+    const [, y, mo, d, slug] = m
+    const pubDate = new Date(`${y}-${mo}-${d}T00:00:00Z`)
+    if (isNaN(pubDate.getTime()) || pubDate.getTime() < cutoff) return
+    items.push({
+      title: slug ? slug.replace(/-/g, ' ') : href,
+      url: href,
+      pubDate,
+    })
+  })
+  // Newest first.
+  return items.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime())
+}
+
+// Pull URLs out of a sitemap.xml. Sitemaps may not include <lastmod>, so we
+// can't apply the lookback filter — we trust the listing order (sitemaps are
+// generally newest-first) and rely on MAX_ARTICLES_PER_BLOG to bound load.
+async function fetchSitemapItems(
+  sitemapUrl: string,
+  filter: (url: string) => boolean
+): Promise<RssItem[]> {
+  const xml = await fetch(sitemapUrl, fetchOpts()).then((r) => r.text())
+  const $ = cheerio.load(xml, { xmlMode: true })
+  const items: RssItem[] = []
+  $('url').each((_, el) => {
+    const url = $(el).children('loc').text().trim()
+    if (!url || !filter(url)) return
+    const lastmodRaw = $(el).children('lastmod').text().trim()
+    const lastmod = lastmodRaw ? new Date(lastmodRaw) : null
+    items.push({
+      title: new URL(url).pathname.split('/').filter(Boolean).pop()?.replace(/-/g, ' ') ?? url,
+      url,
+      pubDate: lastmod && !isNaN(lastmod.getTime()) ? lastmod : new Date(),
+    })
   })
   return items
 }
@@ -449,7 +526,7 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
     let items: RssItem[]
 
     try {
-      items = await fetchFeedItems(blog.feed)
+      items = await blog.discover()
     } catch (err) {
       summary.errors.push(`${blog.name} feed: ${err instanceof Error ? err.message : String(err)}`)
       continue

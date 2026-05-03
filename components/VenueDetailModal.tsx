@@ -4,6 +4,7 @@ import { useMemo } from 'react'
 import type { DayKey, HoursWindow, PlanCard as PlanCardType, Profile, TransitMode } from '@/lib/planner/types'
 import { isEvent } from '@/lib/planner/category'
 import { directionsUrl } from '@/lib/directions'
+import { photoUrlOrFallback } from '@/lib/photo-fallback'
 import { FairnessPill } from './FairnessPill'
 import { SourceAttribution } from './SourceAttribution'
 import { VenueMiniMap } from './VenueMiniMap'
@@ -93,10 +94,20 @@ export function VenueDetailModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="relative h-56 w-full bg-stone-100">
-          {card.photo_url && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={card.photo_url} alt={card.name} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
-          )}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={photoUrlOrFallback(card)}
+            alt={card.name}
+            referrerPolicy="no-referrer"
+            className="h-full w-full object-cover"
+            onError={(e) => {
+              const img = e.currentTarget
+              if (img.dataset.fallback) return
+              img.dataset.fallback = '1'
+              img.src = photoUrlOrFallback({ ...card, photo_url: null })
+            }}
+          />
+
           <div className="absolute right-3 top-3 flex gap-2">
             {onToggleShortlist && (
               <button
@@ -224,10 +235,19 @@ export function VenueDetailModal({
                     className="flex w-full items-center gap-3 rounded-xl bg-stone-50 p-2.5 text-left ring-1 ring-stone-200 transition hover:bg-white hover:ring-stone-300"
                   >
                     <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-stone-200">
-                      {c.photo_url && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={c.photo_url} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
-                      )}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={photoUrlOrFallback(c)}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        className="h-full w-full object-cover"
+                        onError={(e) => {
+                          const img = e.currentTarget
+                          if (img.dataset.fallback) return
+                          img.dataset.fallback = '1'
+                          img.src = photoUrlOrFallback({ ...c, photo_url: null })
+                        }}
+                      />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="line-clamp-1 text-sm font-semibold text-stone-900">{c.name}</div>

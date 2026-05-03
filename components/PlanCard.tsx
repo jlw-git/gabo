@@ -1,6 +1,7 @@
 import type { LatLng, PlanCard as PlanCardType, Profile, TransitMode } from '@/lib/planner/types'
 import { isEvent } from '@/lib/planner/category'
 import { directionsUrl } from '@/lib/directions'
+import { photoUrlOrFallback } from '@/lib/photo-fallback'
 import { FairnessPill } from './FairnessPill'
 import { SourceAttribution } from './SourceAttribution'
 
@@ -65,10 +66,20 @@ export function PlanCard({
       aria-label={`View details for ${card.name}`}
     >
       <div className="relative h-40 w-full bg-stone-100">
-        {card.photo_url && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={card.photo_url} alt={card.name} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
-        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={photoUrlOrFallback(card)}
+          alt={card.name}
+          referrerPolicy="no-referrer"
+          className="h-full w-full object-cover"
+          onError={(e) => {
+            const img = e.currentTarget
+            if (img.dataset.fallback) return
+            img.dataset.fallback = '1'
+            img.src = photoUrlOrFallback({ ...card, photo_url: null })
+          }}
+        />
+
         <div className="absolute right-3 top-3 flex flex-col items-end gap-1.5">
           {badgeCopy && (
             <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold backdrop-blur ${badgeChip(card)}`}>
