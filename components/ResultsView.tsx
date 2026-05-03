@@ -27,6 +27,8 @@ type Props = {
   overrideTags: string[]
   startA: PlaceSelection | null
   startB: PlaceSelection | null
+  weather?: { condition: 'clear' | 'rain'; text: string | null } | null
+  outdoorExcluded?: number
   onBack: () => void
 }
 
@@ -53,6 +55,8 @@ export function ResultsView({
   overrideTags,
   startA,
   startB,
+  weather = null,
+  outdoorExcluded = 0,
   onBack,
 }: Props) {
   const [booking, setBooking] = useState<PlanCardType | null>(null)
@@ -129,6 +133,16 @@ export function ResultsView({
           {!startA && !startB && ' · islandwide'}
         </p>
       </header>
+
+      {weather?.condition === 'rain' && outdoorExcluded > 0 && (
+        <div className="flex items-start gap-2 rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-900 ring-1 ring-sky-200">
+          <span aria-hidden="true">🌧️</span>
+          <p>
+            Hiding {outdoorExcluded} outdoor {outdoorExcluded === 1 ? 'spot' : 'spots'} for this
+            slot — NEA forecast: {weather.text ?? 'rain expected'}.
+          </p>
+        </div>
+      )}
 
       {totalCards > 0 && (
         <>

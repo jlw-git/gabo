@@ -68,6 +68,16 @@ Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + Supabase (Postgr
 - **Google Places 403 with empty Referer** = `API_KEY_HTTP_REFERRER_BLOCKED`. Server-to-server calls always have an empty Referer; in GCP Console, change the key's Application restrictions from "HTTP referrers" to "None" or to "IP addresses" with Vercel egress IPs.
 - **Next.js prod build runs `tsc` strict; `next dev` (Turbopack) doesn't.** Type errors won't show locally during dev but will fail Vercel deploys. Run `npx next build` before pushing if you've touched API routes.
 
+## Doc maintenance
+**Update [Gabo_prd.md](Gabo_prd.md) in the same commit as any change that affects what users see or how the planner decides.** This includes:
+- New UI surfaces (sections, banners, badges, pills) → §2 user flow
+- Hard-filter rule changes → §4.1
+- Scoring weight or formula changes → §4.3
+- New data sources or provenance behaviour → §6
+- Planner-visible env-var or operational-state changes → §6.4
+
+CLAUDE.md captures dev state and gotchas; the PRD is the canonical product spec. Implementation polish (marker shapes, animation timings, internal helpers) doesn't need a PRD entry.
+
 ## UX preferences — already learned, don't ignore
 (See also `feedback_ux_patterns.md` in memory.)
 - **No fixture names** ("Alex"/"Sam" etc) in the UI. Only show real names captured from onboarding; fallback is "You"/"Partner".

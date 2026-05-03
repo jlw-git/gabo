@@ -66,6 +66,20 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
 
   const candidates = filterCandidates(venues, profile, request.override_tags, weather, scheduledDate)
 
+  // Counterfactual: how many candidates would have surfaced if it weren't
+  // raining? We use this to drive a "X outdoor spots hidden — rain expected"
+  // pill in the UI, so users understand why outdoor venues are absent.
+  const outdoorExcluded =
+    weather.condition === 'rain'
+      ? filterCandidates(
+          venues,
+          profile,
+          request.override_tags,
+          { ...weather, condition: 'clear' },
+          scheduledDate
+        ).length - candidates.length
+      : 0
+
   const topByPrescore = [...candidates]
     .sort((a, b) => prescore(b, profile) - prescore(a, profile))
     .slice(0, ROUTING_CANDIDATE_CAP)
@@ -150,6 +164,7 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
       cached_legs: cachedLegs,
       total_legs: needsRouting ? ranked.length * (startA && startB ? 2 : 1) : 0,
       total_cards: totalCards,
+      outdoor_excluded: outdoorExcluded,
       starts_provided: (startA ? 1 : 0) + (startB ? 1 : 0),
       weather,
     },
