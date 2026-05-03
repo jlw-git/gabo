@@ -270,7 +270,7 @@ export function VenueDetailModal({
               {primaryCta}
             </button>
             <a
-              href={directionsUrl({ lat: card.lat, lng: card.lng, name: card.name, address: card.address })}
+              href={directionsUrl({ lat: card.lat, lng: card.lng, name: card.name, address: card.address, source: card.source, source_id: card.source_id })}
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-stone-700 ring-1 ring-stone-300 transition hover:bg-stone-50 hover:text-stone-900 active:scale-[0.98]"

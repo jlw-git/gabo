@@ -174,7 +174,7 @@ export function PlanCard({
             {primaryCta}
           </button>
           <a
-            href={directionsUrl({ lat: card.lat, lng: card.lng, name: card.name, address: card.address })}
+            href={directionsUrl({ lat: card.lat, lng: card.lng, name: card.name, address: card.address, source: card.source, source_id: card.source_id })}
             target="_blank"
             rel="noopener noreferrer"
             onClick={stop}
