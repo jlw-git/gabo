@@ -99,7 +99,7 @@ export async function syncEventsCatalog(): Promise<EventsSyncSummary> {
   const deduped = [...byKey.values()]
 
   // 6) Upsert to Supabase. Service role bypasses RLS — sync routes are
-  // already protected by CRON_TOKEN.
+  // already protected by CRON_SECRET.
   const supabase = createServiceRoleClient()
   const chunkSize = 50
   for (let i = 0; i < deduped.length; i += chunkSize) {

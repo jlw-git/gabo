@@ -3,7 +3,7 @@ import { syncEventsCatalog } from '@/lib/sources/events-sync'
 
 // Refreshes the events catalog from Bandsintown (concerts) + SAM/NGS scrapers
 // + editorial (ArtScience, NHB, Gardens, Esplanade). Daily cron.
-// Run manually: curl -H "Authorization: Bearer $CRON_TOKEN" https://<host>/api/cron/sync-events
+// Run manually: curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/sync-events
 //
 // maxDuration bumped to 300s: NGS scraper fetches up to 20 detail pages in
 // parallel, which can take 15–30 s on cold starts.
@@ -11,7 +11,7 @@ import { syncEventsCatalog } from '@/lib/sources/events-sync'
 export const maxDuration = 300
 
 export async function GET(request: NextRequest) {
-  const expected = process.env.CRON_TOKEN
+  const expected = process.env.CRON_SECRET
   if (expected) {
     const got = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
     if (got !== expected) {

@@ -39,7 +39,7 @@ Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + Supabase (Postgr
 - `app/api/cron/sync-blogs/` — weekly editorial-blog scanner (Tue 09:00 UTC)
 - `app/api/cron/sync-eatbook/` — weekly Eatbook roundup-style sync
 - `app/api/cron/sync-museums/` — monthly museum-exhibition refresh (Gemini-grounded search)
-- `app/api/admin/reseed/` — one-shot full wipe + resync (gated by CRON_TOKEN)
+- `app/api/admin/reseed/` — one-shot full wipe + resync (gated by CRON_SECRET)
 - `app/api/recommendations/` — pre-search editorial recs feed
 - `components/` — `PlanDateForm`, `PlaceSearchInput`, `PlanCard`, `FairnessPill`, `RecommendationsFeed`, `ResultsView` (incl. "What's new & trending" strip), `VenueDetailModal`, `BookingOverlay`, `WhatsAppShareModal`, `OverviewMap`, `VenueMiniMap`
 - `lib/onemap/` — `client.ts` (auth, search, drive, pt routes), `cache.ts`
@@ -89,7 +89,7 @@ Parked enhancements:
 - The legacy `lib/venues/catalog.ts` file is no longer used by the app but kept until `/api/admin/reseed` has been run in prod and verified.
 
 ## Secrets
-- `.env.local` (see `.env.example`): `ONEMAP_EMAIL`, `ONEMAP_PASSWORD`, `GOOGLE_PLACES_API_KEY`, `FOURSQUARE_API_KEY` (fallback), `GOOGLE_GEMINI_API_KEY` (blog scanner, museum agent, plan eval), `BANDSINTOWN_APP_ID`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` + `NEXT_PUBLIC_*` mirrors. Optional: `CRON_TOKEN` (gates `/api/cron/*` and `/api/admin/reseed`), `PREWARM_TOKEN`. Never commit. The old `GRABMAPS_API_KEY` is no longer used.
+- `.env.local` (see `.env.example`): `ONEMAP_EMAIL`, `ONEMAP_PASSWORD`, `GOOGLE_PLACES_API_KEY`, `FOURSQUARE_API_KEY` (fallback), `GOOGLE_GEMINI_API_KEY` (blog scanner, museum agent, plan eval), `BANDSINTOWN_APP_ID`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` + `NEXT_PUBLIC_*` mirrors. Optional: `CRON_SECRET` (gates `/api/cron/*` and `/api/admin/reseed`), `PREWARM_TOKEN`. Never commit. The old `GRABMAPS_API_KEY` is no longer used.
 
 ## Out of scope for v1
 Partner-facing app, account sharing, push notifications, payment, rescheduling, magic-link auth (deferred — localStorage profile works for demo).

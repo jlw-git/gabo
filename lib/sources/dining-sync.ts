@@ -143,7 +143,7 @@ export async function syncDiningCatalog(): Promise<DiningSyncSummary> {
   summary.after_dedup = deduped.length
 
   // Upsert into Supabase. Service role bypasses RLS — sync routes are
-  // already protected by CRON_TOKEN.
+  // already protected by CRON_SECRET.
   const supabase = createServiceRoleClient()
   const chunkSize = 50
   for (let i = 0; i < deduped.length; i += chunkSize) {
