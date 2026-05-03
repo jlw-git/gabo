@@ -50,20 +50,29 @@ async function loadVenues(): Promise<Venue[]> {
 }
 
 function pickTrending(venues: Venue[], now: Date): Venue[] {
-  return [...venues]
-    .filter((v) => {
-      if (v.trending_score >= 0.55 || v.badge === 'critic_pick' || v.badge === 'award_fresh') return true
-      // Surface all upcoming events even if trending_score is 0 — they're
-      // time-bounded so any future exhibition is relevant.
-      if (isEvent(v)) {
-        const ends = v.badge_meta?.ends_at
-        if (typeof ends !== 'string' && typeof ends !== 'number') return true
-        return new Date(ends) > now
-      }
-      return false
-    })
-    .sort((a, b) => b.trending_score - a.trending_score)
-    .slice(0, PER_LIST_LIMIT)
+  const eligible = venues.filter((v) => {
+    if (v.trending_score >= 0.55 || v.badge === 'critic_pick' || v.badge === 'award_fresh') return true
+    // Editorial rows came from the blog scanner — they're picks chosen by
+    // SG food bloggers we trust, so they belong in the home "right now"
+    // feed even when trending_score isn't computed for them yet.
+    if (v.source === 'editorial') return true
+    // Surface all upcoming events even if trending_score is 0 — they're
+    // time-bounded so any future exhibition is relevant.
+    if (isEvent(v)) {
+      const ends = v.badge_meta?.ends_at
+      if (typeof ends !== 'string' && typeof ends !== 'number') return true
+      return new Date(ends) > now
+    }
+    return false
+  })
+  // Cap per category — without this, with many editorial dining venues all
+  // tied at trending_score=0, events would crowd out dining (or vice versa)
+  // depending on insertion order. Home UI has separate Dining/Events tabs;
+  // each needs its own pool of up to PER_LIST_LIMIT picks.
+  const bySort = (a: Venue, b: Venue) => b.trending_score - a.trending_score
+  const dining = eligible.filter((v) => !isEvent(v)).sort(bySort).slice(0, PER_LIST_LIMIT)
+  const events = eligible.filter(isEvent).sort(bySort).slice(0, PER_LIST_LIMIT)
+  return [...dining, ...events]
 }
 
 function pickNew(venues: Venue[], now: Date): Venue[] {
