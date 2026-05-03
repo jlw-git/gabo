@@ -120,7 +120,15 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
       }
       // No start points — islandwide search.
       return scoreWithoutEtas(venue, profile, request.override_tags)
-    } catch {
+    } catch (err) {
+      // Per-venue routing failures used to be silent; if every venue fails
+      // (e.g. OneMap auth misconfigured) the whole plan returns 0 cards
+      // with no signal. Log to Vercel Functions logs so the next breakage
+      // is visible in 30 seconds, not via diagnostic Q&A.
+      console.error(
+        `[plan] routing failed for "${venue.name}" (${venue.lat},${venue.lng}):`,
+        err instanceof Error ? err.message : String(err)
+      )
       return null
     }
   })
