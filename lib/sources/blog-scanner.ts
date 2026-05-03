@@ -331,9 +331,9 @@ Return every Singapore restaurant, café, bar, or food venue clearly described i
 - address: the most specific Singapore address mentioned (street + district or postal code). Skip venues with no concrete address.
 - cuisine_tags: 1–3 tags from ONLY this list: ${CUISINE_TAGS.join(', ')}
 - vibe_tags: 0–2 tags from ONLY: cozy, adventurous, celebratory, low_key
-- opens_at: opening date as YYYY-MM-DD, or null if not mentioned
+- opens_at: opening date as YYYY-MM-DD if the article explicitly states one (e.g. "opens 15 March 2026", "soft-launched last week", "just opened in May"). Use null if the article doesn't state an opening date — DO NOT guess from the article's publication date.
 - photo_url: the URL most clearly tied to this venue from the list above. MUST exactly match one of the URLs listed. Use null if none clearly applies.
-- is_new_opening: true if the article frames this venue as newly opened, soft-launched, or recently arrived (last few months); false for established venues being reviewed or ranked
+- is_new_opening: true ONLY if the article explicitly says the venue opened recently (within ~6 months) AND you can extract a concrete opens_at date. Set false for general reviews of established venues, "best of" round-ups, or anniversary write-ups. When uncertain, default to false.
 
 Skip venues outside Singapore. Skip venues mentioned only in passing without enough detail to plan a visit.
 
@@ -591,7 +591,12 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
         if (seenIds.has(source_id)) continue
         seenIds.add(source_id)
 
-        const isNew = venue.is_new_opening
+        // Require BOTH is_new_opening AND a parseable opens_at before badging
+        // as soft_launch. Falling back to the article's pubDate produced
+        // misleading "opened 3 days ago" copy for established venues that
+        // happened to be reviewed recently (e.g. Lucine by LUNA showing as
+        // "opened 3 days ago" when it has been open for months).
+        const isNew = venue.is_new_opening && Boolean(venue.opens_at)
         toInsert.push({
           source: 'editorial',
           source_id,
@@ -612,7 +617,7 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
           badge: isNew ? 'soft_launch' : 'none',
           badge_meta: isNew
             ? {
-                opened: venue.opens_at ?? item.pubDate.toISOString().slice(0, 10),
+                opened: venue.opens_at as string,
                 reason: `${blog.name} new opening`,
                 hours_source: 'default',
               }
