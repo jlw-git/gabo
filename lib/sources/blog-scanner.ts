@@ -87,8 +87,15 @@ export type BlogScanSummary = {
   addresses_validated: number
   already_in_catalog: number
   upserted: number
+  aged_out: number
   errors: string[]
 }
+
+// A blog-discovered venue is "new" only for ~90 days — past that, the hype
+// signal has decayed and it's just another spot in the catalog. We use
+// last_synced_at as the proxy for "still being talked about": if the scanner
+// stopped seeing a venue in feeds for 90 days, its soft_launch badge is stale.
+const SOFT_LAUNCH_TTL_DAYS = 90
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -268,6 +275,25 @@ async function resolveAddress(
   return null
 }
 
+// ─── Freshness ────────────────────────────────────────────────────────────────
+
+async function ageStaleSoftLaunches(summary: BlogScanSummary): Promise<number> {
+  const cutoff = new Date(Date.now() - SOFT_LAUNCH_TTL_DAYS * 86400_000).toISOString()
+  const supabase = createServiceRoleClient()
+  const { data, error } = await supabase
+    .from('venues')
+    .update({ badge: 'none' })
+    .eq('source', 'editorial')
+    .eq('badge', 'soft_launch')
+    .lt('last_synced_at', cutoff)
+    .select('id')
+  if (error) {
+    summary.errors.push(`age-out: ${error.message}`)
+    return 0
+  }
+  return data?.length ?? 0
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export async function scanBlogs(): Promise<BlogScanSummary> {
@@ -280,6 +306,7 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
     addresses_validated: 0,
     already_in_catalog: 0,
     upserted: 0,
+    aged_out: 0,
     errors: [],
   }
 
@@ -287,6 +314,8 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
     summary.errors.push('GOOGLE_GEMINI_API_KEY not set — skipping blog scan')
     return summary
   }
+
+  summary.aged_out = await ageStaleSoftLaunches(summary)
 
   type VenueRow = {
     source: 'editorial'
