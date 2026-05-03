@@ -110,7 +110,7 @@ Return ONLY a raw JSON array, no markdown, no explanation:
 async function callGemini(prompt: string): Promise<Map<string, string>> {
   const ai = geminiClient()
   const result = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     contents: prompt,
   })
 

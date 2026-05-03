@@ -1,15 +1,23 @@
-// Multi-blog scanner for new Singapore restaurant/venue openings.
+// Multi-blog scanner for Singapore restaurant/venue posts. Doubles as both
+// the soft-launch discovery layer AND a general dining-catalog stopgap when
+// the API providers (Google Places / Foursquare) are down.
 //
 // Runs weekly via /api/cron/sync-blogs. For each configured food blog:
-//   1. Fetches the RSS feed and filters posts whose title signals a new opening
+//   1. Fetches the RSS feed (90-day lookback, capped per blog)
 //   2. Fetches the article HTML and strips it to plain text
-//   3. Sends to Gemini Flash to extract structured venue data
-//   4. Validates the address via OneMap to get a confirmed lat/lng
-//   5. Upserts to Supabase as source='editorial', badge='soft_launch'
+//   3. Sends to Gemini Flash, which returns ALL Singapore venues discussed
+//      in the post (single review or roundup) plus an is_new_opening flag
+//      per venue
+//   4. Validates each address via OneMap to get a confirmed lat/lng
+//   5. Upserts each venue as source='editorial', with
+//      badge='soft_launch' when is_new_opening=true, else badge='none'
 //
 // Source IDs: {blog-prefix}-{slugified-venue-name} — idempotent across runs.
-// Eatbook is intentionally excluded here; it has its own dedicated sync
-// (lib/sources/eatbook-rss.ts) that handles roundup-style articles differently.
+// Cross-blog dedup is not handled here (a venue mentioned by Seth Lui and
+// DFD ends up as two rows); acceptable for the stopgap.
+//
+// Eatbook is intentionally excluded; it has its own dedicated sync
+// (lib/sources/eatbook-rss.ts).
 //
 // Requires: GOOGLE_GEMINI_API_KEY (free at aistudio.google.com)
 
@@ -19,44 +27,75 @@ import { searchPlaces } from '@/lib/onemap/client'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 
 // ─── Blog registry ────────────────────────────────────────────────────────────
+//
+// Not all blogs have a working RSS feed. Each config has a `discover()` that
+// returns the article list however that blog publishes it:
+//   - rssFeed:  classic RSS 2.0 (Sethlui, Ladyironchef)
+//   - htmlListing: scrape <a> URLs from a category page (Daniel Food Diary —
+//     their /feed/ endpoint is permanently broken)
+//   - sitemapUrls: pull <loc> entries from sitemap.xml (Miss Tam Chiak — Gatsby
+//     SSG with no RSS plugin enabled)
+
+type RssItem = { title: string; url: string; pubDate: Date }
 
 type BlogConfig = {
   name: string
   prefix: string // short prefix for source_id, e.g. 'sethlui'
-  feed: string   // RSS 2.0 feed URL
+  discover: () => Promise<RssItem[]>
 }
 
 const BLOGS: BlogConfig[] = [
   {
     name: 'Seth Lui',
     prefix: 'sethlui',
-    feed: 'https://sethlui.com/feed/',
+    // Food-section feed only — the main /feed/ surfaces lots of non-food
+    // content (lifestyle guides, gift round-ups) that wastes Gemini calls.
+    discover: () => fetchFeedItems('https://sethlui.com/section/food/feed/'),
   },
   {
     name: 'Daniel Food Diary',
     prefix: 'dfd',
-    feed: 'https://danielfooddiary.com/feed/',
+    // Article URLs follow /YYYY/MM/DD/slug/ — pubDate is parseable from path.
+    discover: () =>
+      fetchHtmlListing(
+        'https://danielfooddiary.com/category/singapore/',
+        /^https:\/\/danielfooddiary\.com\/(\d{4})\/(\d{2})\/(\d{2})\/([^/]+)\/$/
+      ),
   },
   {
     name: 'Miss Tam Chiak',
     prefix: 'mtc',
-    feed: 'https://www.misstamchiak.com/feed/',
+    // Sitemap is roughly newest-first; we cap to MAX_ARTICLES_PER_BLOG via
+    // the main loop, so older entries simply never get processed.
+    discover: () =>
+      fetchSitemapItems('https://www.misstamchiak.com/sitemap-0.xml', (u) => {
+        // Reject homepage, paginated archive, category roots, tag pages.
+        const path = new URL(u).pathname
+        if (path === '/' || path === '') return false
+        if (/^\/(page|category|tag|author)\//.test(path)) return false
+        return true
+      }),
   },
   {
     name: 'Ladyironchef',
     prefix: 'lic',
-    feed: 'https://www.ladyironchef.com/feed/',
+    discover: () => fetchFeedItems('https://www.ladyironchef.com/feed/'),
   },
 ]
 
-// Regex to identify posts about new openings from the RSS title alone.
-const NEW_OPENING_SIGNALS =
-  /new\s+(restaurant|café|cafe|bar|bistro|opening|spot|joint)|just\s+opened|first\s+look|now\s+open|soft\s+launch|opens?\s+in\s+singapore|newly\s+opened|grand\s+opening/i
-
-const LOOKBACK_DAYS = 45
-const FETCH_OPTS = {
-  headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Gabo/1.0)' },
-  signal: AbortSignal.timeout(15_000),
+const LOOKBACK_DAYS = 90
+// Cap per-blog article count so a backlogged feed can't push the cron past
+// the 300s maxDuration. Each article is one Gemini call (~1–3s) plus
+// per-venue OneMap lookups.
+const MAX_ARTICLES_PER_BLOG = 25
+// Per-request — AbortSignal.timeout fires from creation time, so reusing a
+// module-level signal aborts every fetch once the module has been live longer
+// than the timeout.
+function fetchOpts(): RequestInit {
+  return {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Gabo/1.0)' },
+    signal: AbortSignal.timeout(15_000),
+  }
 }
 
 // Cuisine tags Gemini is allowed to assign (subset of our tag vocabulary).
@@ -76,6 +115,7 @@ type ExtractedVenue = {
   vibe_tags: string[]
   opens_at: string | null
   photo_url: string | null
+  is_new_opening: boolean
 }
 
 export type BlogScanSummary = {
@@ -87,7 +127,40 @@ export type BlogScanSummary = {
   addresses_validated: number
   already_in_catalog: number
   upserted: number
+  aged_out: number
   errors: string[]
+}
+
+// A blog-discovered venue is "new" only for ~90 days — past that, the hype
+// signal has decayed and it's just another spot in the catalog. We use
+// last_synced_at as the proxy for "still being talked about": if the scanner
+// stopped seeing a venue in feeds for 90 days, its soft_launch badge is stale.
+const SOFT_LAUNCH_TTL_DAYS = 90
+
+// Default hours by cuisine — blog posts almost never include opening hours
+// in a parseable form, but the planner requires hours_json to surface a
+// venue. These are deliberately wide so the planner doesn't filter out a
+// venue at a time the venue actually IS open. badge_meta.hours_source =
+// 'default' flags this so we can replace later if we add a hours-scraper.
+const DEFAULT_HOURS = {
+  bar: { open: '1700', close: '2400' },
+  cafe: { open: '0900', close: '2100' },
+  dining: { open: '1130', close: '2230' },
+} as const
+
+function defaultHoursFor(cuisineTags: string[]): { open: string; close: string } {
+  if (cuisineTags.some((t) => t === 'bar' || t === 'cocktail')) return DEFAULT_HOURS.bar
+  if (cuisineTags.some((t) => t === 'cafe' || t === 'bakery' || t === 'dessert' || t === 'brunch'))
+    return DEFAULT_HOURS.cafe
+  return DEFAULT_HOURS.dining
+}
+
+const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
+function buildDefaultHoursJson(cuisineTags: string[]) {
+  const w = defaultHoursFor(cuisineTags)
+  const out: Record<string, { open: string; close: string }[]> = {}
+  for (const d of ALL_DAYS) out[d] = [w]
+  return out
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -106,12 +179,10 @@ function slugify(name: string): string {
     .slice(0, 60)
 }
 
-// ─── RSS parsing ──────────────────────────────────────────────────────────────
-
-type RssItem = { title: string; url: string; pubDate: Date }
+// ─── Article discovery ───────────────────────────────────────────────────────
 
 async function fetchFeedItems(feedUrl: string): Promise<RssItem[]> {
-  const xml = await fetch(feedUrl, FETCH_OPTS).then((r) => r.text())
+  const xml = await fetch(feedUrl, fetchOpts()).then((r) => r.text())
   const $ = cheerio.load(xml, { xmlMode: true })
   const cutoff = Date.now() - LOOKBACK_DAYS * 86_400_000
   const items: RssItem[] = []
@@ -129,20 +200,88 @@ async function fetchFeedItems(feedUrl: string): Promise<RssItem[]> {
   return items
 }
 
+// Scrape <a href> URLs out of a category/listing HTML page. The pattern must
+// have YYYY/MM/DD as capture groups 1-3; pubDate is reconstructed from those.
+// Title falls back to the URL slug since this is post-regex now (the title
+// is just used in error messages and Gemini context).
+async function fetchHtmlListing(listingUrl: string, urlPattern: RegExp): Promise<RssItem[]> {
+  const html = await fetch(listingUrl, fetchOpts()).then((r) => r.text())
+  const $ = cheerio.load(html)
+  const cutoff = Date.now() - LOOKBACK_DAYS * 86_400_000
+  const seen = new Set<string>()
+  const items: RssItem[] = []
+  $('a[href]').each((_, el) => {
+    const href = $(el).attr('href') ?? ''
+    const m = href.match(urlPattern)
+    if (!m) return
+    if (seen.has(href)) return
+    seen.add(href)
+    const [, y, mo, d, slug] = m
+    const pubDate = new Date(`${y}-${mo}-${d}T00:00:00Z`)
+    if (isNaN(pubDate.getTime()) || pubDate.getTime() < cutoff) return
+    items.push({
+      title: slug ? slug.replace(/-/g, ' ') : href,
+      url: href,
+      pubDate,
+    })
+  })
+  // Newest first.
+  return items.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime())
+}
+
+// Pull URLs out of a sitemap.xml. Sitemaps may not include <lastmod>, so we
+// can't apply the lookback filter — we trust the listing order (sitemaps are
+// generally newest-first) and rely on MAX_ARTICLES_PER_BLOG to bound load.
+async function fetchSitemapItems(
+  sitemapUrl: string,
+  filter: (url: string) => boolean
+): Promise<RssItem[]> {
+  const xml = await fetch(sitemapUrl, fetchOpts()).then((r) => r.text())
+  const $ = cheerio.load(xml, { xmlMode: true })
+  const items: RssItem[] = []
+  $('url').each((_, el) => {
+    const url = $(el).children('loc').text().trim()
+    if (!url || !filter(url)) return
+    const lastmodRaw = $(el).children('lastmod').text().trim()
+    const lastmod = lastmodRaw ? new Date(lastmodRaw) : null
+    items.push({
+      title: new URL(url).pathname.split('/').filter(Boolean).pop()?.replace(/-/g, ' ') ?? url,
+      url,
+      pubDate: lastmod && !isNaN(lastmod.getTime()) ? lastmod : new Date(),
+    })
+  })
+  return items
+}
+
 // ─── Article text extraction ──────────────────────────────────────────────────
 
-async function fetchArticleText(url: string): Promise<{ text: string; photoUrl: string | null }> {
-  const html = await fetch(url, FETCH_OPTS).then((r) => r.text())
+async function fetchArticleText(
+  url: string
+): Promise<{ text: string; photoUrl: string | null; imageUrls: string[] }> {
+  const html = await fetch(url, fetchOpts()).then((r) => r.text())
   const $ = cheerio.load(html)
 
   // Remove nav, footer, sidebar, ads, comments
   $('nav, footer, aside, .sidebar, .comments, .related, script, style, [class*="ad"]').remove()
 
-  // Grab first content image (og:image is most reliable)
+  // Grab first content image (og:image is most reliable for single-venue posts)
   const ogImage = $('meta[property="og:image"]').attr('content') ?? null
   const firstImg =
     $('article img, .entry-content img, .post-content img').first().attr('src') ?? null
   const photoUrl = ogImage || firstImg || null
+
+  // Collect every image URL inside the article body — Gemini gets this list
+  // and must PICK from it (eliminates hallucinated URLs on roundup posts).
+  const imageSet = new Set<string>()
+  $('article img, .entry-content img, .post-content img').each((_, el) => {
+    const src =
+      $(el).attr('src') ||
+      $(el).attr('data-src') ||
+      $(el).attr('data-lazy-src') ||
+      ''
+    if (src.startsWith('http')) imageSet.add(src)
+  })
+  const imageUrls = [...imageSet].slice(0, 50)
 
   // Extract article body text
   const body =
@@ -155,21 +294,27 @@ async function fetchArticleText(url: string): Promise<{ text: string; photoUrl: 
     .trim()
     .slice(0, 4000) // cap tokens — Gemini Flash handles this easily
 
-  return { text, photoUrl }
+  return { text, photoUrl, imageUrls }
 }
 
 // ─── Gemini extraction ────────────────────────────────────────────────────────
 
-async function extractVenue(
+async function extractVenues(
   blog: BlogConfig,
   title: string,
   url: string,
   text: string,
-  articlePhotoUrl: string | null
-): Promise<ExtractedVenue | null> {
+  articlePhotoUrl: string | null,
+  articleImageUrls: string[]
+): Promise<ExtractedVenue[]> {
   const ai = geminiClient()
 
-  const prompt = `You are extracting structured data from a Singapore food blog post about a new restaurant or venue opening.
+  const imageList =
+    articleImageUrls.length > 0
+      ? articleImageUrls.map((u, i) => `  ${i}: ${u}`).join('\n')
+      : '  (no images available)'
+
+  const prompt = `You are extracting structured data from a Singapore food blog post.
 
 Blog: ${blog.name}
 Article title: ${title}
@@ -178,69 +323,89 @@ Article URL: ${url}
 Article text (truncated):
 ${text}
 
-If this article reviews or announces a single new Singapore venue, extract:
+Available image URLs in this article (you MUST pick photo_url from this list — do not invent URLs):
+${imageList}
+
+Return every Singapore restaurant, café, bar, or food venue clearly described in the article — single review OR roundup ("10 best omakase…"). For each venue extract:
 - name: the venue's full name
-- address: the most specific Singapore address mentioned (street + district or postal code)
+- address: the most specific Singapore address mentioned (street + district or postal code). Skip venues with no concrete address.
 - cuisine_tags: 1–3 tags from ONLY this list: ${CUISINE_TAGS.join(', ')}
 - vibe_tags: 0–2 tags from ONLY: cozy, adventurous, celebratory, low_key
 - opens_at: opening date as YYYY-MM-DD, or null if not mentioned
-- photo_url: the main food/venue image URL from the article, or null
+- photo_url: the URL most clearly tied to this venue from the list above. MUST exactly match one of the URLs listed. Use null if none clearly applies.
+- is_new_opening: true if the article frames this venue as newly opened, soft-launched, or recently arrived (last few months); false for established venues being reviewed or ranked
 
-If this article covers multiple venues (a roundup), return null.
-If the venue is not in Singapore, return null.
-If there is no new opening (e.g. it's a general guide or ranking), return null.
+Skip venues outside Singapore. Skip venues mentioned only in passing without enough detail to plan a visit.
 
-Return ONLY raw JSON — no markdown, no explanation:
-{ "name": "...", "address": "...", "cuisine_tags": [...], "vibe_tags": [...], "opens_at": "...", "photo_url": "..." }
-or
-null`
+Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
+[
+  { "name": "...", "address": "...", "cuisine_tags": [...], "vibe_tags": [...], "opens_at": null, "photo_url": null, "is_new_opening": false }
+]`
 
   const result = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     contents: prompt,
   })
 
   const raw = (result.text ?? '').trim()
-  if (raw === 'null' || raw === '') return null
+  if (!raw) return []
 
-  const jsonMatch = raw.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) return null
+  // Tolerate fenced code blocks, leading/trailing prose
+  const jsonMatch = raw.match(/\[[\s\S]*\]/)
+  if (!jsonMatch) return []
 
+  let parsed: unknown
   try {
-    const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>
-    if (typeof parsed.name !== 'string' || !parsed.name) return null
-    if (typeof parsed.address !== 'string' || !parsed.address) return null
+    parsed = JSON.parse(jsonMatch[0])
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
 
-    const cuisine_tags = Array.isArray(parsed.cuisine_tags)
-      ? (parsed.cuisine_tags as unknown[])
+  const out: ExtractedVenue[] = []
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object') continue
+    const v = item as Record<string, unknown>
+    if (typeof v.name !== 'string' || !v.name) continue
+    if (typeof v.address !== 'string' || !v.address) continue
+
+    const cuisine_tags = Array.isArray(v.cuisine_tags)
+      ? (v.cuisine_tags as unknown[])
           .filter((t): t is string => typeof t === 'string' && CUISINE_TAGS.includes(t))
           .slice(0, 3)
       : []
 
-    const vibe_tags = Array.isArray(parsed.vibe_tags)
-      ? (parsed.vibe_tags as unknown[])
-          .filter((t): t is string =>
-            typeof t === 'string' && ['cozy', 'adventurous', 'celebratory', 'low_key'].includes(t)
+    const vibe_tags = Array.isArray(v.vibe_tags)
+      ? (v.vibe_tags as unknown[])
+          .filter(
+            (t): t is string =>
+              typeof t === 'string' && ['cozy', 'adventurous', 'celebratory', 'low_key'].includes(t)
           )
           .slice(0, 2)
       : []
 
     const opens_at =
-      typeof parsed.opens_at === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.opens_at)
-        ? parsed.opens_at
-        : null
+      typeof v.opens_at === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.opens_at) ? v.opens_at : null
 
-    // Prefer article og:image over Gemini's extraction (more reliable)
+    // Photo: only accept Gemini's pick if it's actually in the article (defends
+    // against URL hallucination). For single-venue posts, fall back to og:image.
+    const allowedImages = new Set(articleImageUrls)
+    const geminiPhoto =
+      typeof v.photo_url === 'string' && allowedImages.has(v.photo_url) ? v.photo_url : null
     const photo_url =
-      articlePhotoUrl ??
-      (typeof parsed.photo_url === 'string' && parsed.photo_url.startsWith('http')
-        ? parsed.photo_url
-        : null)
+      parsed.length === 1 ? (articlePhotoUrl ?? geminiPhoto) : geminiPhoto
 
-    return { name: parsed.name, address: parsed.address, cuisine_tags, vibe_tags, opens_at, photo_url }
-  } catch {
-    return null
+    out.push({
+      name: v.name,
+      address: v.address,
+      cuisine_tags,
+      vibe_tags,
+      opens_at,
+      photo_url,
+      is_new_opening: v.is_new_opening === true,
+    })
   }
+  return out
 }
 
 // ─── OneMap address validation ────────────────────────────────────────────────
@@ -251,8 +416,23 @@ async function resolveAddress(
   venueName: string,
   address: string
 ): Promise<{ lat: number; lng: number; resolvedAddress: string } | null> {
-  // Try venue name + address first for best precision, fall back to address alone
-  const queries = [`${venueName} ${address}`, address]
+  // OneMap chokes on unit numbers like "#02-01" or "#02-123/124" — strip them.
+  const cleaned = address
+    .replace(/#\s*\d+[\s\-/\d]*\d?/g, ' ')
+    .replace(/,\s*,/g, ',')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+
+  // SG postal codes are 6 digits and OneMap resolves them very reliably alone.
+  const postal = address.match(/\b(\d{6})\b/)?.[1]
+
+  const queries = [
+    `${venueName} ${cleaned}`,
+    cleaned,
+    postal,
+    venueName,
+  ].filter((q): q is string => Boolean(q?.trim()))
+
   for (const q of queries) {
     try {
       const results = await searchPlaces(q, 1)
@@ -268,6 +448,25 @@ async function resolveAddress(
   return null
 }
 
+// ─── Freshness ────────────────────────────────────────────────────────────────
+
+async function ageStaleSoftLaunches(summary: BlogScanSummary): Promise<number> {
+  const cutoff = new Date(Date.now() - SOFT_LAUNCH_TTL_DAYS * 86400_000).toISOString()
+  const supabase = createServiceRoleClient()
+  const { data, error } = await supabase
+    .from('venues')
+    .update({ badge: 'none' })
+    .eq('source', 'editorial')
+    .eq('badge', 'soft_launch')
+    .lt('last_synced_at', cutoff)
+    .select('id')
+  if (error) {
+    summary.errors.push(`age-out: ${error.message}`)
+    return 0
+  }
+  return data?.length ?? 0
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export async function scanBlogs(): Promise<BlogScanSummary> {
@@ -280,6 +479,7 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
     addresses_validated: 0,
     already_in_catalog: 0,
     upserted: 0,
+    aged_out: 0,
     errors: [],
   }
 
@@ -287,6 +487,8 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
     summary.errors.push('GOOGLE_GEMINI_API_KEY not set — skipping blog scan')
     return summary
   }
+
+  summary.aged_out = await ageStaleSoftLaunches(summary)
 
   type VenueRow = {
     source: 'editorial'
@@ -303,10 +505,14 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
     is_outdoor: false
     photo_url: string | null
     chope_url: string | null
-    hours_json: null
+    hours_json: ReturnType<typeof buildDefaultHoursJson>
     ph_hours_json: null
-    badge: 'soft_launch'
-    badge_meta: { opened: string | null; reason: string }
+    badge: 'soft_launch' | 'none'
+    badge_meta: {
+      opened?: string | null
+      reason?: string
+      hours_source: 'default'
+    }
     trending_score: 0
     active: true
     last_synced_at: string
@@ -320,23 +526,28 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
     let items: RssItem[]
 
     try {
-      items = await fetchFeedItems(blog.feed)
+      items = await blog.discover()
     } catch (err) {
       summary.errors.push(`${blog.name} feed: ${err instanceof Error ? err.message : String(err)}`)
       continue
     }
 
-    for (const item of items) {
-      summary.articles_checked++
+    // Newest first, capped — feeds usually return reverse-chronological already.
+    const capped = items
+      .slice()
+      .sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime())
+      .slice(0, MAX_ARTICLES_PER_BLOG)
 
-      if (!NEW_OPENING_SIGNALS.test(item.title)) continue
-      summary.articles_matched++
+    for (const item of capped) {
+      summary.articles_checked++
 
       let text: string
       let articlePhotoUrl: string | null
+      let articleImageUrls: string[]
 
       try {
-        ;({ text, photoUrl: articlePhotoUrl } = await fetchArticleText(item.url))
+        ;({ text, photoUrl: articlePhotoUrl, imageUrls: articleImageUrls } =
+          await fetchArticleText(item.url))
       } catch (err) {
         summary.errors.push(
           `${blog.name} "${item.title}": fetch failed — ${err instanceof Error ? err.message : String(err)}`
@@ -344,9 +555,16 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
         continue
       }
 
-      let venue: ExtractedVenue | null
+      let venues: ExtractedVenue[]
       try {
-        venue = await extractVenue(blog, item.title, item.url, text, articlePhotoUrl)
+        venues = await extractVenues(
+          blog,
+          item.title,
+          item.url,
+          text,
+          articlePhotoUrl,
+          articleImageUrls
+        )
       } catch (err) {
         summary.errors.push(
           `${blog.name} "${item.title}": Gemini error — ${err instanceof Error ? err.message : String(err)}`
@@ -354,45 +572,56 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
         continue
       }
 
-      if (!venue) continue
-      summary.venues_extracted++
+      if (venues.length === 0) continue
+      summary.articles_matched++
 
-      const location = await resolveAddress(venue.name, venue.address).catch(() => null)
-      if (!location) {
-        summary.errors.push(
-          `${blog.name} "${venue.name}": OneMap could not resolve "${venue.address}"`
-        )
-        continue
+      for (const venue of venues) {
+        summary.venues_extracted++
+
+        const location = await resolveAddress(venue.name, venue.address).catch(() => null)
+        if (!location) {
+          summary.errors.push(
+            `${blog.name} "${venue.name}": OneMap could not resolve "${venue.address}"`
+          )
+          continue
+        }
+        summary.addresses_validated++
+
+        const source_id = `${blog.prefix}-${slugify(venue.name)}`
+        if (seenIds.has(source_id)) continue
+        seenIds.add(source_id)
+
+        const isNew = venue.is_new_opening
+        toInsert.push({
+          source: 'editorial',
+          source_id,
+          source_url: item.url,
+          name: venue.name,
+          lat: location.lat,
+          lng: location.lng,
+          address: location.resolvedAddress,
+          cuisine_tags: venue.cuisine_tags,
+          vibe_tags: venue.vibe_tags,
+          dietary_flags: [],
+          budget_band: 2,
+          is_outdoor: false,
+          photo_url: venue.photo_url,
+          chope_url: null,
+          hours_json: buildDefaultHoursJson(venue.cuisine_tags),
+          ph_hours_json: null,
+          badge: isNew ? 'soft_launch' : 'none',
+          badge_meta: isNew
+            ? {
+                opened: venue.opens_at ?? item.pubDate.toISOString().slice(0, 10),
+                reason: `${blog.name} new opening`,
+                hours_source: 'default',
+              }
+            : { hours_source: 'default' },
+          trending_score: 0,
+          active: true,
+          last_synced_at: new Date().toISOString(),
+        })
       }
-      summary.addresses_validated++
-
-      const source_id = `${blog.prefix}-${slugify(venue.name)}`
-      if (seenIds.has(source_id)) continue
-      seenIds.add(source_id)
-
-      toInsert.push({
-        source: 'editorial',
-        source_id,
-        source_url: item.url,
-        name: venue.name,
-        lat: location.lat,
-        lng: location.lng,
-        address: location.resolvedAddress,
-        cuisine_tags: venue.cuisine_tags,
-        vibe_tags: venue.vibe_tags,
-        dietary_flags: [],
-        budget_band: 2,
-        is_outdoor: false,
-        photo_url: venue.photo_url,
-        chope_url: null,
-        hours_json: null,
-        ph_hours_json: null,
-        badge: 'soft_launch',
-        badge_meta: { opened: venue.opens_at ?? item.pubDate.toISOString().slice(0, 10), reason: `${blog.name} new opening` },
-        trending_score: 0,
-        active: true,
-        last_synced_at: new Date().toISOString(),
-      })
     }
   }
 

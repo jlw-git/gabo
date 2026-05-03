@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e0e7ff"/>
+      <stop offset="100%" stop-color="#c7d2fe"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="500" fill="url(#bg)"/>
+  <g stroke="#3730a3" stroke-opacity="0.55" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 310 180 L 310 200 Q 310 215 295 215 Q 295 230 310 230 L 310 290 L 490 290 L 490 230 Q 505 230 505 215 Q 505 200 490 200 L 490 180 Z"/>
+    <line x1="400" y1="180" x2="400" y2="200" stroke-dasharray="4 4"/>
+    <line x1="400" y1="225" x2="400" y2="245" stroke-dasharray="4 4"/>
+    <line x1="400" y1="270" x2="400" y2="290" stroke-dasharray="4 4"/>
+  </g>
+  <text x="400" y="395" text-anchor="middle" font-family="system-ui, -apple-system, BlinkMacSystemFont, sans-serif" font-size="22" font-weight="700" letter-spacing="6" fill="#3730a3" fill-opacity="0.55">EVENT</text>
+</svg>

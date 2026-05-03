@@ -1,0 +1,31 @@
+name: Build check
+
+# Catches the kinds of errors that previously broke production silently —
+# specifically the type errors that `next build` enforces but `next dev`
+# (Turbopack) doesn't. Run on PRs to main and pushes to main itself.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  typecheck:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # tsc --noEmit is what `next build` runs internally. Running it
+      # standalone here means we don't need any env vars / Supabase
+      # credentials in CI — we just want to catch type drift before
+      # Vercel does.
+      - run: npx tsc --noEmit

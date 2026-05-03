@@ -31,9 +31,14 @@ const LOOKBACK_DAYS = 90
 // Rough Singapore bounding box for result validation
 const SG = { latMin: 1.15, latMax: 1.48, lngMin: 103.6, lngMax: 104.1 }
 
-const FETCH_OPTS = {
-  headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Gabo/1.0)' },
-  signal: AbortSignal.timeout(15_000),
+// Per-request — AbortSignal.timeout fires from creation time, so a
+// module-level signal aborts every fetch once the module has been live
+// longer than the timeout.
+function fetchOpts(): RequestInit {
+  return {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Gabo/1.0)' },
+    signal: AbortSignal.timeout(15_000),
+  }
 }
 
 export type EatbookSyncSummary = {
@@ -51,7 +56,7 @@ export type EatbookSyncSummary = {
 type RssItem = { url: string; pubDate: Date }
 
 async function fetchFeedItems(feedUrl: string): Promise<RssItem[]> {
-  const xml = await fetch(feedUrl, FETCH_OPTS).then(r => r.text())
+  const xml = await fetch(feedUrl, fetchOpts()).then(r => r.text())
   const $ = cheerio.load(xml, { xmlMode: true })
   const cutoff = Date.now() - LOOKBACK_DAYS * 86_400_000
   const items: RssItem[] = []
@@ -78,7 +83,7 @@ function stripLeadingNumber(text: string): string {
 }
 
 async function extractNames(articleUrl: string): Promise<string[]> {
-  const html = await fetch(articleUrl, FETCH_OPTS).then(r => r.text())
+  const html = await fetch(articleUrl, fetchOpts()).then(r => r.text())
   const $ = cheerio.load(html)
   const names: string[] = []
 

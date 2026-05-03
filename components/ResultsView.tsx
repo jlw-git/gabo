@@ -101,6 +101,7 @@ export function ResultsView({
 
   const tabCards = tab === 'dining' ? buckets.dining : buckets.events
   const activeCards = useMemo(() => applyFilter(tabCards, filter, shortlist), [tabCards, filter, shortlist])
+  const featuredCards = useMemo(() => selectFeatured(tabCards), [tabCards])
   const shortlistCount = useMemo(
     () => allCards.filter((c) => shortlist.has(c.id)).length,
     [allCards, shortlist]
@@ -146,6 +147,48 @@ export function ResultsView({
               <ViewTab active={view === 'map'} onClick={() => setView('map')} label="Map" />
             </div>
           </div>
+
+          {view === 'list' && featuredCards.length > 0 && (
+            <section
+              aria-label="What's new and trending"
+              className="border-t border-stone-200 pt-5"
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <h2 className="text-base font-semibold tracking-tight">
+                  What&rsquo;s new &amp; trending
+                </h2>
+                <span className="hidden text-xs text-stone-500 sm:inline">
+                  {tab === 'dining'
+                    ? 'Spotted by SG food blogs · trending this week'
+                    : 'Trending this week'}
+                </span>
+              </div>
+              <div className="mt-3 -mx-4 flex gap-3 overflow-x-auto px-4 pb-2 [-ms-overflow-style:none] [scrollbar-width:none] md:mx-0 md:grid md:grid-cols-2 md:gap-3 md:overflow-visible md:px-0 lg:grid-cols-3 [&::-webkit-scrollbar]:hidden">
+                {featuredCards.map((c) => (
+                  <div
+                    key={`featured-${c.id}`}
+                    className="w-72 flex-shrink-0 md:w-auto"
+                  >
+                    <PlanCard
+                      card={c}
+                      profile={profile}
+                      defaultMode={defaultMode}
+                      plannerLabel={plannerLabel}
+                      partnerLabel={partnerLabel}
+                      shortlisted={shortlist.has(c.id)}
+                      startA={startA ? { lat: startA.lat, lng: startA.lng } : null}
+                      startB={startB ? { lat: startB.lat, lng: startB.lng } : null}
+                      scheduledFor={scheduledFor}
+                      onBook={(card) => setBooking(card)}
+                      onOpenDetails={(card) => setDetails(card)}
+                      onShare={(card) => setShared(card)}
+                      onToggleShortlist={toggleShortlist}
+                    />
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {view === 'list' && (
             <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -288,6 +331,23 @@ export function ResultsView({
       )}
     </div>
   )
+}
+
+// Editorial strip: blog-discovered new openings (badge='soft_launch') + Reddit /
+// shortlist-velocity trending. Capped to 3, soft-launch boosted so blog finds
+// surface alongside high-trending venues.
+function selectFeatured(cards: PlanCardType[]): PlanCardType[] {
+  const eligible = cards.filter(
+    (c) => c.badge === 'soft_launch' || c.trending_score >= 0.7
+  )
+  return eligible
+    .slice()
+    .sort((a, b) => {
+      const sa = a.trending_score + (a.badge === 'soft_launch' ? 0.5 : 0)
+      const sb = b.trending_score + (b.badge === 'soft_launch' ? 0.5 : 0)
+      return sb - sa
+    })
+    .slice(0, 3)
 }
 
 function applyFilter(cards: PlanCardType[], filter: Filter, shortlist: Set<string>): PlanCardType[] {
