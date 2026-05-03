@@ -32,7 +32,8 @@ Time-strapped couples in Singapore spend ~30 minutes per date night juggling tab
 8. **Trending** pill rendered for venues with `trending_score ≥ 0.7` and no other badge — surfaces buzzy spots that aren't critic picks.
 9. **Highlighting**: cards with badges get a colour-coded ring matching the badge chip — closing-soon pop-ups read as time-sensitive at a glance.
 10. **Detail modal** (tap card or shortlist/share buttons) — full hours, badge meta, profile-match tag highlights, embedded **OSM mini-map** with both partners' routes drawn, **cross-recommendations** (top 3 venues from the opposite category within 6 km), category-aware Reserve/Get tickets CTA + Directions linkout.
-11. **Overview Map** (single-screen view) — all picks pinned, color-coded by category (rose dining / violet events). Tap pin → detail modal.
+11. **Overview Map** (single-screen view) — all picks pinned, color-coded by category (rose dining / violet events). Tap pin → detail modal. Start points (You / Partner) render as **teardrop pin shapes** with the letter A / B inside, in distinct colours from the venue dots — so users can tell their own location apart from suggested venues at a glance.
+12. **Weather pill** — when NEA's forecast for the requested slot indicates rain *and* the rain filter actually excluded ≥ 1 outdoor venue, a sky-blue pill renders above the results: *"Hiding N outdoor spots — NEA forecast: <text>"*. Hidden on clear days or when no outdoor venues were affected; avoids cluttering sunny-day results while explaining the absence of outdoor picks (e.g. Gardens by the Bay) on rainy slots.
 
 ### C. Handoff (~10s) — **built**
 1. The **share button (↗)** on any card or detail modal opens an editable textarea pre-filled with: venue name, formatted date/time, address, GrabMaps location link.

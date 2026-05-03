@@ -26,6 +26,8 @@ type Stage =
       overrideTags: string[]
       startA: PlaceSelection | null
       startB: PlaceSelection | null
+      weather: { condition: 'clear' | 'rain'; text: string | null } | null
+      outdoorExcluded: number
     }
   | { kind: 'error'; message: string }
 
@@ -98,7 +100,13 @@ export default function Home() {
           "We couldn't put together a plan right now. Please try again in a moment."
         )
       }
-      const data = (await res.json()) as { buckets: Buckets }
+      const data = (await res.json()) as {
+        buckets: Buckets
+        meta?: {
+          weather?: { condition: 'clear' | 'rain'; text: string | null } | null
+          outdoor_excluded?: number
+        }
+      }
       setStage({
         kind: 'results',
         buckets: data.buckets ?? { dining: [], events: [] },
@@ -106,6 +114,8 @@ export default function Home() {
         overrideTags: payload.override_tags,
         startA: payload.startADetails,
         startB: payload.startBDetails,
+        weather: data.meta?.weather ?? null,
+        outdoorExcluded: data.meta?.outdoor_excluded ?? 0,
       })
     } catch (err) {
       setStage({ kind: 'error', message: err instanceof Error ? err.message : 'Unknown error' })
@@ -145,6 +155,8 @@ export default function Home() {
             overrideTags={stage.overrideTags}
             startA={stage.startA}
             startB={stage.startB}
+            weather={stage.weather}
+            outdoorExcluded={stage.outdoorExcluded}
             onBack={() => setStage({ kind: 'form' })}
           />
         </div>

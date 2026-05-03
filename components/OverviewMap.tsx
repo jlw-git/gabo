@@ -189,22 +189,21 @@ function venueElement(color: string): HTMLDivElement {
 }
 
 function dotElement(color: string, label: string): HTMLDivElement {
+  // Start markers (You / Partner) — taller pin shape with letter inside, so
+  // they read as a different category of marker from the venue dots. Anchored
+  // at the bottom of the SVG so the tip sits on the exact lat/lng.
   const el = document.createElement('div')
-  el.style.cssText = [
-    `background:${color}`,
-    'color:white',
-    'width:22px',
-    'height:22px',
-    'border-radius:50%',
-    'display:flex',
-    'align-items:center',
-    'justify-content:center',
-    'font-size:10px',
-    'font-weight:700',
-    'border:2px solid white',
-    'box-shadow:0 2px 6px rgba(0,0,0,0.3)',
-  ].join(';')
-  el.textContent = label
+  el.style.cssText = 'width:32px;height:40px;cursor:default;line-height:0'
+  el.innerHTML = `
+    <svg width="32" height="40" viewBox="0 0 32 40" xmlns="http://www.w3.org/2000/svg">
+      <path d="M16 1 C23.73 1 30 7.27 30 15 C30 25.5 16 38 16 38 C16 38 2 25.5 2 15 C2 7.27 8.27 1 16 1 Z"
+            fill="${color}" stroke="white" stroke-width="2"
+            style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.35))" />
+      <text x="16" y="20" text-anchor="middle" fill="white"
+            font-size="13" font-weight="700"
+            font-family="system-ui, -apple-system, BlinkMacSystemFont, sans-serif">${label}</text>
+    </svg>
+  `
   return el
 }
 
