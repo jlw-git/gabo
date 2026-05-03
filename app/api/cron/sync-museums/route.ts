@@ -4,14 +4,14 @@ import { runMuseumAgent } from '@/lib/sources/museum-agent'
 // Monthly museum exhibition discovery. Uses Claude + web search to find
 // current and upcoming exhibitions at ArtScience Museum, NHB, and Gardens
 // by the Bay -- sites that are JS-rendered and not fetch()-scrapeable.
-// Run manually: curl -H "Authorization: Bearer $CRON_TOKEN" https://<host>/api/cron/sync-museums
+// Run manually: curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/sync-museums
 //
 // Requires ANTHROPIC_API_KEY in env.
 
 export const maxDuration = 120
 
 export async function GET(request: NextRequest) {
-  const expected = process.env.CRON_TOKEN
+  const expected = process.env.CRON_SECRET
   if (expected) {
     const got = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
     if (got !== expected) {

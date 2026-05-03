@@ -4,12 +4,12 @@ import { syncEatbookNewOpenings } from '@/lib/sources/eatbook-rss'
 // Discovers new Singapore restaurant openings via Eatbook RSS feeds, resolves
 // them through Google Places, and inserts genuinely new venues with
 // badge:'soft_launch'. Weekly cron (Mon 07:00 UTC, after dining sync).
-// Run manually: curl -H "Authorization: Bearer $CRON_TOKEN" https://<host>/api/cron/sync-eatbook
+// Run manually: curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/sync-eatbook
 
 export const maxDuration = 120
 
 export async function GET(request: NextRequest) {
-  const expected = process.env.CRON_TOKEN
+  const expected = process.env.CRON_SECRET
   if (expected) {
     const got = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
     if (got !== expected) {

@@ -283,7 +283,7 @@ Both are min-max normalised across the catalog and combined. The Reddit
 weight is 0.8 in cold-start (until total shortlist events ≥ 25 catalog-wide),
 then drops to 0.4 once internal data is meaningful.
 
-Manual run: `curl -H "Authorization: Bearer $CRON_TOKEN" https://<host>/api/cron/trending`.
+Manual run: `curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/trending`.
 
 ---
 

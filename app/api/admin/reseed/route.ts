@@ -10,16 +10,16 @@ import { refreshTrendingScores } from '@/lib/trending/refresh'
 //   3. Run the events sync (Bandsintown + museum scrapers + editorial)
 //   4. Refresh trending scores (Reddit + shortlist velocity)
 //
-// Gate behind CRON_TOKEN (if set). Safe to call from localhost without token
-// when CRON_TOKEN is unset in the environment.
+// Gate behind CRON_SECRET (if set). Safe to call from localhost without token
+// when CRON_SECRET is unset in the environment.
 //
-//   curl -X POST -H "Authorization: Bearer $CRON_TOKEN" \
+//   curl -X POST -H "Authorization: Bearer $CRON_SECRET" \
 //     https://<host>/api/admin/reseed
 
 export const maxDuration = 300
 
 export async function POST(request: NextRequest) {
-  const expected = process.env.CRON_TOKEN
+  const expected = process.env.CRON_SECRET
   if (expected) {
     const got = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
     if (got !== expected) {

@@ -3,12 +3,12 @@ import { refreshTrendingScores } from '@/lib/trending/refresh'
 
 // Recomputes trending_score for all venues from real signals (Reddit + shortlist
 // velocity). Wire to a weekly Vercel Cron via vercel.json or hit manually:
-//   curl -H "Authorization: Bearer $CRON_TOKEN" https://<host>/api/cron/trending
+//   curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/trending
 
 export const maxDuration = 300 // up to 5min — Reddit calls dominate
 
 export async function GET(request: NextRequest) {
-  const expected = process.env.CRON_TOKEN
+  const expected = process.env.CRON_SECRET
   if (expected) {
     const got = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
     if (got !== expected) {

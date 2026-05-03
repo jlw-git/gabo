@@ -3,12 +3,12 @@ import { syncDiningCatalog } from '@/lib/sources/dining-sync'
 
 // Refreshes the dining catalog from Google Places (with Foursquare fallback).
 // Wire to a weekly Vercel Cron via vercel.json or hit manually:
-//   curl -H "Authorization: Bearer $CRON_TOKEN" https://<host>/api/cron/sync-dining
+//   curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/sync-dining
 
 export const maxDuration = 300
 
 export async function GET(request: NextRequest) {
-  const expected = process.env.CRON_TOKEN
+  const expected = process.env.CRON_SECRET
   if (expected) {
     const got = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
     if (got !== expected) {
