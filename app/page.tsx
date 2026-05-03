@@ -89,8 +89,14 @@ export default function Home() {
         }),
       })
       if (!res.ok) {
+        // Server messages can include sensitive config detail (env-var names,
+        // file paths, internal credentials text). Log the real response for
+        // developers; show users a generic, actionable message.
         const detail = await res.text().catch(() => '')
-        throw new Error(detail || `Request failed (${res.status})`)
+        console.error(`/api/plan ${res.status}:`, detail)
+        throw new Error(
+          "We couldn't put together a plan right now. Please try again in a moment."
+        )
       }
       const data = (await res.json()) as { buckets: Buckets }
       setStage({
