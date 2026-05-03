@@ -155,7 +155,7 @@ async function searchExhibitions(museum: MuseumConfig): Promise<RawExhibition[]>
   const ai = geminiClient()
 
   const result = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     contents: `Search for current and upcoming exhibitions at ${museum.name} in Singapore.
 Today is ${today}. Only include exhibitions running now or opening within the next 6 months.
 Return ONLY a raw JSON array with no markdown, no explanation. Each item must have:
