@@ -17,6 +17,10 @@ type Props = {
   startA?: LatLng | null
   startB?: LatLng | null
   scheduledFor?: Date
+  // When provided, the pill is controlled by the parent (e.g. a global toggle
+  // on the results page). The per-card toggle is hidden in that case.
+  mode?: TransitMode
+  onModeChange?: (mode: TransitMode) => void
 }
 
 type TransitState =
@@ -35,8 +39,16 @@ export function FairnessPill({
   startA,
   startB,
   scheduledFor,
+  mode: controlledMode,
+  onModeChange,
 }: Props) {
-  const [mode, setMode] = useState<TransitMode>(defaultMode)
+  const isControlled = controlledMode !== undefined
+  const [internalMode, setInternalMode] = useState<TransitMode>(defaultMode)
+  const mode = isControlled ? controlledMode : internalMode
+  const setMode = (m: TransitMode) => {
+    if (onModeChange) onModeChange(m)
+    if (!isControlled) setInternalMode(m)
+  }
   const [transit, setTransit] = useState<TransitState>({ kind: 'idle' })
   const fetchedRef = useRef(false)
 
@@ -92,7 +104,7 @@ export function FairnessPill({
           </span>
         </span>
       </div>
-      <ModeToggle mode={mode} onChange={setMode} />
+      {!isControlled && <ModeToggle mode={mode} onChange={setMode} />}
     </div>
   )
 }

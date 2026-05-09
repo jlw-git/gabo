@@ -17,6 +17,10 @@ type Props = {
   startA?: LatLng | null
   startB?: LatLng | null
   scheduledFor?: Date
+  // When provided, the FairnessPill is driven by a global toggle and its own
+  // per-card toggle is hidden.
+  mode?: TransitMode
+  onModeChange?: (mode: TransitMode) => void
   onBook: (card: PlanCardType) => void
   onOpenDetails: (card: PlanCardType) => void
   onShare?: (card: PlanCardType) => void
@@ -35,6 +39,8 @@ export function PlanCard({
   startA = null,
   startB = null,
   scheduledFor,
+  mode,
+  onModeChange,
   onBook,
   onOpenDetails,
   onShare,
@@ -159,6 +165,8 @@ export function PlanCard({
             startA={startA}
             startB={startB}
             scheduledFor={scheduledFor}
+            mode={mode}
+            onModeChange={onModeChange}
           />
         )}
 

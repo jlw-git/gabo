@@ -66,6 +66,8 @@ export function ResultsView({
   const [tab, setTab] = useState<Tab>('dining')
   const [filter, setFilter] = useState<Filter>('all')
   const [shortlist, setShortlist] = useState<Set<string>>(new Set())
+  const initialMode: TransitMode = profile.transit_pref === 'mrt' ? 'transit' : 'drive'
+  const [mode, setMode] = useState<TransitMode>(initialMode)
 
   // Hydrate shortlist from localStorage once on mount.
   useEffect(() => {
@@ -86,8 +88,6 @@ export function ResultsView({
     })
   }
 
-  const defaultMode: TransitMode =
-    profile.transit_pref === 'mrt' ? 'transit' : 'drive'
   const totalCards = buckets.dining.length + buckets.events.length
   const plannerLabel = profile.planner_name?.trim() || 'You'
   const partnerLabel = profile.partner_name?.trim() || 'Partner'
@@ -109,6 +109,10 @@ export function ResultsView({
   const shortlistCount = useMemo(
     () => allCards.filter((c) => shortlist.has(c.id)).length,
     [allCards, shortlist]
+  )
+  const showEtaToggle = useMemo(
+    () => allCards.some((c) => c.eta_a_min > 0 || c.eta_b_min > 0),
+    [allCards]
   )
 
   return (
@@ -152,13 +156,16 @@ export function ResultsView({
               onChange={setTab}
               counts={{ dining: buckets.dining.length, events: buckets.events.length }}
             />
-            <div
-              className="inline-flex rounded-full bg-stone-100 p-1 ring-1 ring-stone-200"
-              role="tablist"
-              aria-label="Results view"
-            >
-              <ViewTab active={view === 'list'} onClick={() => setView('list')} label="List" />
-              <ViewTab active={view === 'map'} onClick={() => setView('map')} label="Map" />
+            <div className="flex flex-wrap items-center gap-2">
+              {showEtaToggle && <EtaModeToggle mode={mode} onChange={setMode} />}
+              <div
+                className="inline-flex rounded-full bg-stone-100 p-1 ring-1 ring-stone-200"
+                role="tablist"
+                aria-label="Results view"
+              >
+                <ViewTab active={view === 'list'} onClick={() => setView('list')} label="List" />
+                <ViewTab active={view === 'map'} onClick={() => setView('map')} label="Map" />
+              </div>
             </div>
           </div>
 
@@ -186,7 +193,9 @@ export function ResultsView({
                     <PlanCard
                       card={c}
                       profile={profile}
-                      defaultMode={defaultMode}
+                      defaultMode={mode}
+                      mode={mode}
+                      onModeChange={setMode}
                       plannerLabel={plannerLabel}
                       partnerLabel={partnerLabel}
                       shortlisted={shortlist.has(c.id)}
@@ -264,7 +273,7 @@ export function ResultsView({
           startB={startB}
           plannerLabel={plannerLabel}
           partnerLabel={partnerLabel}
-          mode={defaultMode}
+          mode={mode}
           onSelect={(card) => setDetails(card)}
         />
       )}
@@ -288,7 +297,9 @@ export function ResultsView({
                   key={c.id}
                   card={c}
                   profile={profile}
-                  defaultMode={defaultMode}
+                  defaultMode={mode}
+                  mode={mode}
+                  onModeChange={setMode}
                   plannerLabel={plannerLabel}
                   partnerLabel={partnerLabel}
                   shortlisted={shortlist.has(c.id)}
@@ -327,7 +338,7 @@ export function ResultsView({
         <VenueDetailModal
           card={details}
           profile={profile}
-          defaultMode={defaultMode}
+          defaultMode={mode}
           startA={startA ?? undefined}
           startB={startB ?? undefined}
           scheduledFor={scheduledFor}
@@ -501,6 +512,64 @@ function CategoryTabs({
         )
       })}
     </div>
+  )
+}
+
+function EtaModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: TransitMode
+  onChange: (m: TransitMode) => void
+}) {
+  return (
+    <div
+      className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 p-1 pl-2.5 ring-1 ring-stone-200"
+      role="group"
+      aria-label="ETA transport mode"
+    >
+      <span className="text-[11px] font-semibold text-stone-500">Times</span>
+      <div className="inline-flex rounded-full bg-stone-200/70 p-0.5">
+        <EtaModeButton
+          active={mode === 'drive'}
+          onClick={() => onChange('drive')}
+          icon="🚗"
+          label="Show driving ETA for all cards"
+        />
+        <EtaModeButton
+          active={mode === 'transit'}
+          onClick={() => onChange('transit')}
+          icon="🚆"
+          label="Show transit ETA for all cards"
+        />
+      </div>
+    </div>
+  )
+}
+
+function EtaModeButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: string
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={active}
+      onClick={onClick}
+      className={`flex h-6 w-7 items-center justify-center rounded-full text-sm transition ${
+        active ? 'bg-white shadow-sm ring-1 ring-stone-300' : 'text-stone-500 hover:text-stone-800'
+      }`}
+    >
+      <span aria-hidden="true">{icon}</span>
+    </button>
   )
 }
 
