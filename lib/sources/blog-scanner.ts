@@ -116,6 +116,9 @@ type ExtractedVenue = {
   opens_at: string | null
   photo_url: string | null
   is_new_opening: boolean
+  // Tri-state: true / false / null (unknown). Lets the planner trust this
+  // when the article is explicit and fall back to the regex when not.
+  accepts_reservations: boolean | null
 }
 
 export type BlogScanSummary = {
@@ -334,12 +337,16 @@ Return every Singapore restaurant, café, bar, or food venue clearly described i
 - opens_at: opening date as YYYY-MM-DD if the article explicitly states one (e.g. "opens 15 March 2026", "soft-launched last week", "just opened in May"). Use null if the article doesn't state an opening date — DO NOT guess from the article's publication date.
 - photo_url: the URL most clearly tied to this venue from the list above. MUST exactly match one of the URLs listed. Use null if none clearly applies.
 - is_new_opening: true ONLY if the article explicitly says the venue opened recently (within ~6 months) AND you can extract a concrete opens_at date. Set false for general reviews of established venues, "best of" round-ups, or anniversary write-ups. When uncertain, default to false.
+- accepts_reservations: true / false / null based on what the article says about booking.
+    - true: the article mentions reservations, bookings, a reservation phone line, Chope/SevenRooms/OpenTable, "book a table", "reservations recommended", or describes the venue as a sit-down restaurant where bookings are clearly typical.
+    - false: the article explicitly says the venue is walk-in only, "no reservations", "first-come first-served", "queue", or describes it as a hawker stall, food-court tenant, kopitiam, coffee shop, or a small zi char / sliced-fish / bak kut teh / chicken-rice / laksa / prata-style stall where reservations are not taken.
+    - null: the article doesn't say either way and the venue type isn't clearly one or the other. Prefer null over guessing.
 
 Skip venues outside Singapore. Skip venues mentioned only in passing without enough detail to plan a visit.
 
 Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
 [
-  { "name": "...", "address": "...", "cuisine_tags": [...], "vibe_tags": [...], "opens_at": null, "photo_url": null, "is_new_opening": false }
+  { "name": "...", "address": "...", "cuisine_tags": [...], "vibe_tags": [...], "opens_at": null, "photo_url": null, "is_new_opening": false, "accepts_reservations": null }
 ]`
 
   const result = await ai.models.generateContent({
@@ -395,6 +402,13 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
     const photo_url =
       parsed.length === 1 ? (articlePhotoUrl ?? geminiPhoto) : geminiPhoto
 
+    const accepts_reservations =
+      v.accepts_reservations === true
+        ? true
+        : v.accepts_reservations === false
+          ? false
+          : null
+
     out.push({
       name: v.name,
       address: v.address,
@@ -403,6 +417,7 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
       opens_at,
       photo_url,
       is_new_opening: v.is_new_opening === true,
+      accepts_reservations,
     })
   }
   return out
@@ -515,6 +530,7 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
     }
     trending_score: 0
     active: true
+    accepts_reservations: boolean | null
     last_synced_at: string
   }
 
@@ -624,6 +640,7 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
             : { hours_source: 'default' },
           trending_score: 0,
           active: true,
+          accepts_reservations: venue.accepts_reservations,
           last_synced_at: new Date().toISOString(),
         })
       }

@@ -53,7 +53,7 @@ Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + Supabase (Postgr
 - `lib/venues/catalog.ts` — legacy 53-venue seed; no longer used by the app, kept until prod has been resynced and verified
 - `lib/profile-storage.ts`, `lib/shortlist-storage.ts` — localStorage helpers
 - `public/img/fallback/{dining,bar,cafe,event}.svg` — generic card images
-- `supabase/migrations/` — `0001_gabo_schema.sql`, `0002_venues_public_read.sql`, `0003_shortlist_events.sql`
+- `supabase/migrations/` — `0001_gabo_schema.sql`, `0002_venues_public_read.sql`, `0003_shortlist_events.sql`, `0004_venue_sources.sql`, `0005_fix_source_unique_constraint.sql`, `0006_accepts_reservations.sql`
 - `scripts/audit-chope-urls.mjs` — probe each catalog `chope_url` for liveness; outputs CSV
 - `vercel.json` — cron config (trending, dining, events, eatbook, museums, blogs)
 

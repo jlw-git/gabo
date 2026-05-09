@@ -34,6 +34,9 @@ export type Venue = {
   badge_meta: Record<string, unknown> | null
   trending_score: number
   active: boolean
+  // Tri-state: true → takes reservations, false → walk-in only,
+  // null → unknown (UI falls back to chope_url + heuristic in lib/reservations.ts).
+  accepts_reservations?: boolean | null
   // Provenance — where the catalog row came from. Surfaced in the UI per
   // each provider's TOS (Google requires "via Google", Foursquare similar).
   // Older hand-seeded rows default to 'manual'; editorial rows must have a

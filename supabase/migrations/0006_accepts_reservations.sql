@@ -1,0 +1,14 @@
+-- Add an explicit accepts_reservations signal to the venues catalog.
+--
+-- Why: the regex/heuristic in lib/reservations.ts (hawker-dish names, food
+-- court / kopitiam address keywords) catches the loud cases but misses
+-- anything I haven't enumerated. The blog scanner's Gemini extractor often
+-- has a clean signal in the article text ("walk-in only", "no reservations")
+-- and can emit a boolean directly. Persist it so the planner can trust the
+-- column and fall back to the regex only when the column is null.
+--
+-- Tri-state on purpose:
+--   true   → venue takes reservations (Gemini saw a phone/booking line)
+--   false  → venue explicitly does NOT take reservations (walk-in stall etc)
+--   null   → unknown; UI falls back to chope_url + heuristic
+alter table venues add column accepts_reservations boolean;
