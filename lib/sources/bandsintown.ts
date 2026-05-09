@@ -9,6 +9,7 @@
 // closing_soon badge if the event ends within 30 days.
 
 import type { HoursJson, Venue } from '@/lib/planner/types'
+import { sgDayKey, sgHourMinute } from '@/lib/planner/sg-time'
 
 const BASE = 'https://rest.bandsintown.com'
 const SG_CITY = 'Singapore,Singapore'
@@ -142,9 +143,10 @@ export function bandsintownEventToVenue(e: BandsintownEvent): Omit<Venue, 'id'> 
 }
 
 function singleEventHours(eventDate: Date): HoursJson {
-  const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
-  const key = dayKeys[eventDate.getDay()]
-  const start = `${String(eventDate.getHours()).padStart(2, '0')}${String(eventDate.getMinutes()).padStart(2, '0')}`
-  const end = `${String(Math.min(eventDate.getHours() + 2, 23)).padStart(2, '0')}${String(eventDate.getMinutes()).padStart(2, '0')}`
+  const key = sgDayKey(eventDate)
+  const { hour, minute } = sgHourMinute(eventDate)
+  const mm = String(minute).padStart(2, '0')
+  const start = `${String(hour).padStart(2, '0')}${mm}`
+  const end = `${String(Math.min(hour + 2, 23)).padStart(2, '0')}${mm}`
   return { [key]: [{ open: start, close: end }] }
 }
