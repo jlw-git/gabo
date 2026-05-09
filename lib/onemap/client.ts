@@ -9,6 +9,7 @@
 // Caching: route results live in lib/onemap/cache.ts (1h driving / 30m
 // transit) so repeat plans on the same pair don't re-hit the API.
 
+import { sgDayKey, sgHourMinute } from '@/lib/planner/sg-time'
 import { cacheGet, cacheSet, routeKey, tokenStore } from './cache'
 
 const BASE = 'https://www.onemap.gov.sg'
@@ -267,24 +268,35 @@ export async function fetchTransitRoute(
   return result
 }
 
+// OneMap pt routing expects local Singapore date/time. Host is UTC on Vercel,
+// so raw Date accessors would shift every query by 8h and route around the
+// wrong (often nighttime) schedule.
+const SG_DATE_FMT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Singapore',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
 function formatDate(d: Date): string {
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  const yy = d.getFullYear()
-  return `${mm}-${dd}-${yy}`
+  const parts = Object.fromEntries(
+    SG_DATE_FMT.formatToParts(d).map((p) => [p.type, p.value])
+  )
+  return `${parts.month}-${parts.day}-${parts.year}`
 }
 
 function formatTime(d: Date): string {
-  const hh = String(d.getHours()).padStart(2, '0')
-  const mi = String(d.getMinutes()).padStart(2, '0')
+  const { hour, minute } = sgHourMinute(d)
+  const hh = String(hour).padStart(2, '0')
+  const mi = String(minute).padStart(2, '0')
   return `${hh}:${mi}:00`
 }
 
-// Bucket transit cache by hour-of-week — schedules vary by time of day but
-// not minute-by-minute. Same Friday at 19:30 across two weeks reuses the
+// Bucket transit cache by SGT hour-of-week — schedules vary by time of day
+// but not minute-by-minute. Same Friday at 19:30 across two weeks reuses the
 // itinerary; 19:30 vs 21:00 don't.
 function formatDateBucket(d: Date): string {
-  return `${d.getDay()}-${d.getHours()}`
+  return `${sgDayKey(d)}-${sgHourMinute(d).hour}`
 }
 
 // ---------- Polyline decoder (Google polyline algorithm, precision 5) ----------
