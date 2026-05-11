@@ -91,7 +91,7 @@ create table venues (
 ### 3.1 Catalog composition (live-sourced, post-hackathon)
 The legacy 53-venue hand-seeded catalog has been retired. The catalog now grows weekly from real sources (§6). Composition shifts with each cron cycle, but typical state:
 - **Dining**: ~80–150 venues from Google Places + Foursquare when their API access is healthy; ~10–30 from the editorial blog scanner when both API providers are blocked (current state — see §6.4).
-- **Events**: museum exhibitions from `lib/sources/museum-agent.ts` (Gemini Flash + grounded search) plus concerts from Bandsintown.
+- **Events**: museum exhibitions (SAM + NGS live scrapers, plus Gemini-grounded coverage of ArtScience / NHB / Gardens via `lib/sources/museum-agent.ts`), Esplanade in-house programming (theatre / music / dance / festivals via `lib/sources/esplanade.ts`), date-bounded events from The Smart Local's "Things To Do" feed (Gemini-extracted via `lib/sources/tsl-events.ts`), and concerts from Bandsintown.
 - All rows carry `source` + `source_url` for attribution and verifiability (§6.1). Editorial rows are CHECK-constrained to require `source_url`.
 
 ---
@@ -210,10 +210,12 @@ free APIs everywhere it can:
 | Reservation deep-link | `chope_url` if set, else Google Search fallback (`<name> singapore reservation/tickets`) | Real |
 | **Dining venues** | Three-layer pipeline: (1) Google Places (New) Text Search → (2) Foursquare fallback per query when Google fails → (3) editorial blog scanner (Sethlui food-section RSS, Daniel Food Diary HTML category, Miss Tam Chiak sitemap, Ladyironchef RSS) feeding Gemini Flash extraction. Quality-filtered (Google rating ≥ 4.0 with ≥ 100 ratings on the API path; blog path validates addresses against OneMap). | Real |
 | **Events: concerts** | Bandsintown API (city=Singapore) | Real |
-| **Events: exhibitions / pop-ups** | Museum agent (`lib/sources/museum-agent.ts`, Gemini Flash + grounded search per museum) for ArtScience / NHB / Gardens by the Bay etc., supplemented by an editorial layer (`source='editorial'`, mandatory `source_url` pointing to the official public page) | Real |
+| **Events: theatre / dance / music / festivals at Esplanade** | `lib/sources/esplanade.ts` — sitemap.xml → `/whats-on/{year}/{slug}` URLs → JSON-LD `@type: Event` parse on each page (`startDate`, `endDate`, `name`, `image` server-rendered). Single fixed venue (1 Esplanade Drive). | Real |
+| **Events: exhibitions / pop-ups** | Live HTML scrapers for SAM (`/art-events`) and NGS (`/whats-on`); Gemini-grounded coverage of ArtScience / NHB / Gardens via `lib/sources/museum-agent.ts`; one-off editorial layer (`source='editorial'`, mandatory `source_url`) for venues with no scraper or API | Real |
+| **Events: TSL "Things To Do"** | `lib/sources/tsl-events.ts` — TheSmartLocal WP REST API (`/wp-json/wp/v2/posts?categories=13620`) → article HTML → Gemini Flash extraction returning a single date-bounded event per article (rejects listicles and ongoing-attraction posts) → OneMap address validation | Real |
 
 ### 6.1 Provenance — `venues.source`
-Every row carries `source` ∈ {`google_places`, `foursquare`, `bandsintown`, `museum`, `editorial`, `manual`}, with `source_id` (upstream's stable ID) and `source_url` (public page anyone can verify). Editorial rows are CHECK-constrained to require `source_url`. The UI surfaces "via Google" / "via Foursquare" / "official venue page" / "editor's pick" on every card per Google + Foursquare TOS.
+Every row carries `source` ∈ {`google_places`, `foursquare`, `bandsintown`, `museum`, `editorial`, `manual`}, with `source_id` (upstream's stable ID) and `source_url` (public page anyone can verify). Editorial rows are CHECK-constrained to require `source_url`. The UI surfaces "via Google" / "via Foursquare" / "official venue page" / "editor's pick" on every card per Google + Foursquare TOS, and recognised editorial hosts get specific labels ("via Seth Lui", "via The Smart Local", "via Esplanade", etc.) so users can tell sources apart at a glance.
 
 `source = 'manual'` rows are the legacy hand-seeded catalog — wiped on first run of `/api/admin/reseed`.
 
