@@ -81,6 +81,15 @@ const BLOGS: BlogConfig[] = [
     prefix: 'lic',
     discover: () => fetchFeedItems('https://www.ladyironchef.com/feed/'),
   },
+  {
+    name: 'The Smart Local',
+    prefix: 'tsl',
+    // WordPress per-category RSS — covers Food Guides (roundups) + Food
+    // Reviews (single-venue posts) under the parent "Food" category. The
+    // existing extractor handles both shapes via the prompt's
+    // "single review OR roundup" clause.
+    discover: () => fetchFeedItems('https://thesmartlocal.com/category/food-things-to-do/feed/'),
+  },
 ]
 
 const LOOKBACK_DAYS = 90
