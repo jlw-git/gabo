@@ -112,7 +112,21 @@ export function bandsintownEventToVenue(e: BandsintownEvent): Omit<Venue, 'id'> 
   const daysUntil = Math.round((eventDate.getTime() - Date.now()) / 86_400_000)
 
   const badge = daysUntil <= CLOSING_SOON_DAYS ? 'closing_soon' : 'none'
-  const badgeMeta = badge === 'closing_soon' ? { ends_at: e.datetime, reason: 'one-night concert' } : null
+  // A concert is a single-night event — record the show date (date-only,
+  // so the planner's date-window check treats it as the full SG calendar
+  // day). The precise showtime is encoded in hours_json; this gate just
+  // rejects Thursday searches for a concert happening on a *different*
+  // Thursday inside the 90-day horizon. Keep showtime for badge UI.
+  const showDateOnly = eventDate.toISOString().slice(0, 10)
+  const badgeMeta =
+    badge === 'closing_soon'
+      ? {
+          starts_at: showDateOnly,
+          ends_at: showDateOnly,
+          showtime: e.datetime,
+          reason: 'one-night concert',
+        }
+      : { starts_at: showDateOnly, ends_at: showDateOnly, showtime: e.datetime }
 
   // Hours: just the event datetime as a single 2-hour window on the matching day.
   const hours = singleEventHours(eventDate)
