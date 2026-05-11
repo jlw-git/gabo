@@ -208,7 +208,7 @@ free APIs everywhere it can:
 | Weather | NEA rainfall forecast | Real (already was) |
 | Trending score | Reddit mention count (r/singapore + r/SingaporeEats + r/SingaporeFoodPorn) past 7d, hybrid-weighted with internal shortlist-velocity from `shortlist_events` | Real |
 | Reservation deep-link | `chope_url` if set, else Google Search fallback (`<name> singapore reservation/tickets`) | Real |
-| **Dining venues** | Three-layer pipeline: (1) Google Places (New) Text Search → (2) Foursquare fallback per query when Google fails → (3) editorial blog scanner (Sethlui food-section RSS, Daniel Food Diary HTML category, Miss Tam Chiak sitemap, Ladyironchef RSS) feeding Gemini Flash extraction. Quality-filtered (Google rating ≥ 4.0 with ≥ 100 ratings on the API path; blog path validates addresses against OneMap). | Real |
+| **Dining venues** | Three-layer pipeline: (1) Google Places (New) Text Search → (2) Foursquare fallback per query when Google fails → (3) editorial blog scanner (Sethlui food-section RSS, Daniel Food Diary HTML category, Miss Tam Chiak sitemap, Ladyironchef RSS, The Smart Local Food category RSS) feeding Gemini Flash extraction. Quality-filtered (Google rating ≥ 4.0 with ≥ 100 ratings on the API path; blog path validates addresses against OneMap). | Real |
 | **Events: concerts** | Bandsintown API (city=Singapore) | Real |
 | **Events: theatre / dance / music / festivals at Esplanade** | `lib/sources/esplanade.ts` — sitemap.xml → `/whats-on/{year}/{slug}` URLs → JSON-LD `@type: Event` parse on each page (`startDate`, `endDate`, `name`, `image` server-rendered). Single fixed venue (1 Esplanade Drive). | Real |
 | **Events: exhibitions / pop-ups** | Live HTML scrapers for SAM (`/art-events`) and NGS (`/whats-on`); Gemini-grounded coverage of ArtScience / NHB / Gardens via `lib/sources/museum-agent.ts`; one-off editorial layer (`source='editorial'`, mandatory `source_url`) for venues with no scraper or API | Real |
@@ -223,7 +223,7 @@ Every row carries `source` ∈ {`google_places`, `foursquare`, `bandsintown`, `m
 `lib/sources/blog-scanner.ts` (run weekly via `/api/cron/sync-blogs`) is both a discovery layer for new openings AND a stopgap general-catalog source when the API providers are unavailable. Pipeline per blog:
 
 1. **Article discovery** — strategy depends on what each blog publishes:
-   - Sethlui (food-section RSS) and Ladyironchef (RSS) — classic feeds.
+   - Sethlui (food-section RSS), Ladyironchef (RSS), and The Smart Local (Food category RSS at `/category/food-things-to-do/feed/`) — classic feeds. TSL articles cover roundups ("16 New Cafes & Restaurants in May 2026") and single-venue reviews; the Gemini extractor handles both shapes via the same "single review OR roundup" prompt.
    - Daniel Food Diary — `/feed/` is permanently broken upstream, so we scrape `/category/singapore/` HTML for `/YYYY/MM/DD/slug/` URLs (pubDate from path).
    - Miss Tam Chiak — Gatsby SSG with no RSS plugin; we read `sitemap-0.xml`, trust newest-first ordering, filter out category/tag/page archives.
    90-day lookback (where pubDate is available); per-blog cap of 25 articles per run.
