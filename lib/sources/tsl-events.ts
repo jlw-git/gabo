@@ -19,7 +19,22 @@
 import * as cheerio from 'cheerio'
 import { GoogleGenAI } from '@google/genai'
 import { searchPlaces } from '@/lib/onemap/client'
+import type { HoursJson } from '@/lib/planner/types'
 import type { EditorialEvent } from './editorial-events'
+
+// TSL events cover a broad mix (markets, pop-ups, festivals, food crawls).
+// Without per-event hours scraping, a wide 10am–11pm window keeps the
+// planner from filtering them out. Run-window gating happens separately
+// via badge_meta.starts_at / badge_meta.ends_at.
+const DEFAULT_EVENT_HOURS: HoursJson = {
+  mon: [{ open: '1000', close: '2300' }],
+  tue: [{ open: '1000', close: '2300' }],
+  wed: [{ open: '1000', close: '2300' }],
+  thu: [{ open: '1000', close: '2300' }],
+  fri: [{ open: '1000', close: '2300' }],
+  sat: [{ open: '1000', close: '2300' }],
+  sun: [{ open: '1000', close: '2300' }],
+}
 
 const TSL_BASE = 'https://thesmartlocal.com'
 // "Things To Do" category — confirmed via /wp-json/wp/v2/categories?slug=things-to-do
@@ -334,7 +349,10 @@ export async function fetchTslEvents(): Promise<TslExtractedEvent[]> {
       is_outdoor: event.is_outdoor,
       photo_url: photoUrl,
       budget_band: 2,
-      hours: null, // TSL events span days; planner uses starts_at/ends_at
+      // Generous default — most TSL-covered events (markets, pop-ups,
+      // festivals) run 10am–11pm. The planner separately gates on the
+      // event's run window via badge_meta.starts_at/ends_at.
+      hours: DEFAULT_EVENT_HOURS,
       ticket_url: event.ticket_url,
     })
   }
@@ -362,7 +380,7 @@ export function tslEventToVenue(e: TslExtractedEvent): {
   hours_json: import('@/lib/planner/types').HoursJson | null
   ph_hours_json: null
   badge: 'closing_soon' | 'none'
-  badge_meta: { ends_at: string; reason: string } | null
+  badge_meta: { starts_at: string; ends_at: string; reason?: string }
   trending_score: 0
   active: boolean
   source: 'editorial'
@@ -391,7 +409,10 @@ export function tslEventToVenue(e: TslExtractedEvent): {
     hours_json: e.hours ?? null,
     ph_hours_json: null,
     badge: closingSoon ? 'closing_soon' : 'none',
-    badge_meta: closingSoon ? { ends_at: e.ends_at, reason: 'TSL article end date' } : null,
+    // Always persist the run window so the planner can date-gate events.
+    badge_meta: closingSoon
+      ? { starts_at: e.starts_at, ends_at: e.ends_at, reason: 'TSL article end date' }
+      : { starts_at: e.starts_at, ends_at: e.ends_at },
     trending_score: 0,
     active: daysUntilEnd >= -1,
     source: 'editorial',

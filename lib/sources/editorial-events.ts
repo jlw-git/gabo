@@ -71,7 +71,13 @@ export function editorialEventToVenue(e: EditorialEvent): Omit<Venue, 'id'> & {
     hours_json: e.hours ?? null,
     ph_hours_json: null,
     badge: closingSoon ? 'closing_soon' : 'none',
-    badge_meta: closingSoon ? { ends_at: e.ends_at, reason: 'official end date' } : null,
+    // Always persist the run window so the planner can date-gate events
+    // (see filterCandidates in lib/planner/plan-date.ts). The closing_soon
+    // reason is included only when the badge is set, to keep the UI copy
+    // honest.
+    badge_meta: closingSoon
+      ? { starts_at: e.starts_at, ends_at: e.ends_at, reason: 'official end date' }
+      : { starts_at: e.starts_at, ends_at: e.ends_at },
     trending_score: 0,
     active: daysUntilEnd >= -1, // include events ending today
     source: 'editorial',

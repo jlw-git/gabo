@@ -204,8 +204,46 @@ function filterCandidates(
     if (venue.cuisine_tags.some((c) => avoided.has(c))) return false
     if (weather.condition === 'rain' && venue.is_outdoor) return false
     if (!isOpenAt(venue.hours_json, scheduledDate)) return false
+    if (!isInRunWindow(venue, scheduledDate)) return false
     return true
   })
+}
+
+// Event rows record their run window in badge_meta.starts_at / ends_at
+// (see bandsintownEventToVenue, museumEventToVenue, editorialEventToVenue,
+// tslEventToVenue). When both are present, the planner rejects any
+// scheduledDate that falls outside [starts_at, ends_at]. Date-only fields
+// — interpret as inclusive day boundaries so a 14 May search still matches
+// an event whose ends_at is 2026-05-14.
+function isInRunWindow(venue: Venue, scheduledDate: Date): boolean {
+  const meta = venue.badge_meta as Record<string, unknown> | null | undefined
+  if (!meta) return true
+  const startsRaw = typeof meta.starts_at === 'string' ? meta.starts_at : null
+  const endsRaw = typeof meta.ends_at === 'string' ? meta.ends_at : null
+  if (!startsRaw && !endsRaw) return true
+
+  const t = scheduledDate.getTime()
+  if (startsRaw) {
+    const startTs = parseRunBoundary(startsRaw, 'start')
+    if (Number.isFinite(startTs) && t < startTs) return false
+  }
+  if (endsRaw) {
+    const endTs = parseRunBoundary(endsRaw, 'end')
+    if (Number.isFinite(endTs) && t > endTs) return false
+  }
+  return true
+}
+
+// YYYY-MM-DD without a time is a date in SGT (event runs are stored
+// in local terms). A bare date means start-of-day for `starts_at` and
+// end-of-day (23:59:59.999) for `ends_at`. Full ISO timestamps parse
+// directly. Returns NaN on parse failure so the caller falls open.
+function parseRunBoundary(raw: string, kind: 'start' | 'end'): number {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const suffix = kind === 'start' ? 'T00:00:00+08:00' : 'T23:59:59.999+08:00'
+    return new Date(raw + suffix).getTime()
+  }
+  return new Date(raw).getTime()
 }
 
 function filterInMemory(all: Venue[], profile: Profile, overrides: string[]): Venue[] {
