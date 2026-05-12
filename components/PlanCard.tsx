@@ -47,10 +47,11 @@ export function PlanCard({
   onToggleShortlist,
 }: Props) {
   const event = isEvent(card)
-  const badgeCopy = badgeLabel(card)
-  const whyForThem = composeWhy(card, profile)
+  const labels = badgeLabels(card)
+  const whyForThem = composeWhy(card, profile, labels)
   const showFairness = card.eta_a_min > 0 || card.eta_b_min > 0
-  const showTrending = card.badge === 'none' && card.trending_score >= TRENDING_THRESHOLD
+  const showTrending =
+    !labels.some((l) => l.key === 'closing_soon') && card.trending_score >= TRENDING_THRESHOLD
   const ring = ringForBadge(card)
   const primaryCta = event ? 'Get tickets' : 'Reserve'
   // Hawker / food-court venues don't take reservations — show Directions only.
@@ -90,11 +91,14 @@ export function PlanCard({
         />
 
         <div className="absolute right-3 top-3 flex flex-col items-end gap-1.5">
-          {badgeCopy && (
-            <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold backdrop-blur ${badgeChip(card)}`}>
-              {badgeCopy}
+          {labels.map((l) => (
+            <span
+              key={l.key}
+              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold backdrop-blur ${l.chipClass}`}
+            >
+              {l.label}
             </span>
-          )}
+          ))}
           {showTrending && (
             <span className="rounded-full bg-orange-500/90 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur">
               🔥 Trending
@@ -121,7 +125,7 @@ export function PlanCard({
                 }}
                 label={`Share ${card.name}`}
               >
-                ↗
+                <ShareIcon />
               </IconButton>
             )}
           </div>
@@ -139,19 +143,11 @@ export function PlanCard({
       </div>
 
       <div className="space-y-3 p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h3 className="line-clamp-1 text-lg font-semibold tracking-tight">{card.name}</h3>
-            {card.address && (
-              <p className="line-clamp-1 text-sm text-stone-500">{card.address}</p>
-            )}
-          </div>
-          <span
-            aria-hidden="true"
-            className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500 transition group-hover:bg-rose-50 group-hover:text-rose-600"
-          >
-            ›
-          </span>
+        <div className="min-w-0">
+          <h3 className="line-clamp-1 text-lg font-semibold tracking-tight">{card.name}</h3>
+          {card.address && (
+            <p className="line-clamp-1 text-sm text-stone-500">{card.address}</p>
+          )}
         </div>
 
         {showFairness && (
@@ -191,11 +187,9 @@ export function PlanCard({
             target="_blank"
             rel="noopener noreferrer"
             onClick={stop}
-            className={
-              showPrimaryCta
-                ? 'rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 ring-1 ring-stone-300 transition hover:bg-stone-50 hover:text-stone-900 active:scale-[0.98]'
-                : 'flex-1 rounded-xl bg-stone-900 px-4 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.98]'
-            }
+            className={`${
+              showPrimaryCta ? '' : 'flex-1 text-center'
+            } rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 ring-1 ring-stone-300 transition hover:bg-stone-50 hover:text-stone-900 active:scale-[0.98]`}
             aria-label={`Get directions to ${card.name}`}
           >
             Directions
@@ -259,43 +253,74 @@ function ringForBadge(card: PlanCardType): { base: string; hover: string } {
   }
 }
 
-function badgeChip(card: PlanCardType): string {
-  // Soft, low-saturation chips so the card content (photo, name) leads.
-  // The card ring still signals urgency for time-sensitive badges.
-  switch (card.badge) {
-    case 'closing_soon':
-      return 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
-    case 'soft_launch':
-      return 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
-    case 'critic_pick':
-      return 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
-    case 'award_fresh':
-      return 'bg-violet-50 text-violet-700 ring-1 ring-violet-200'
-    default:
-      return 'bg-white/90 text-stone-700 ring-1 ring-stone-200'
+type LabelKey = 'closing_soon' | 'soft_launch' | 'critic_pick' | 'award_fresh'
+type CardLabel = { key: LabelKey; label: string; chipClass: string }
+
+// Multi-label rendering. Cards now show every applicable badge chip, sourced
+// from badge_meta (not from the single `badge` column). Order matches the
+// freshness priority in lib/planner/score.ts so the most time-sensitive
+// label appears first when several apply.
+const CLOSING_SOON_WINDOW_DAYS = 30
+const JUST_OPENED_WINDOW_DAYS = 90 // dining; events use 14 but a 90-day cap is fine for label purposes since blog-scanner soft_launch is bounded by SOFT_LAUNCH_TTL_DAYS
+
+function badgeLabels(card: PlanCardType): CardLabel[] {
+  const meta = card.badge_meta ?? {}
+  const out: CardLabel[] = []
+
+  const ends = typeof meta.ends_at === 'string' ? meta.ends_at : null
+  if (ends && daysFromNow(ends) >= 0 && daysFromNow(ends) <= CLOSING_SOON_WINDOW_DAYS) {
+    const d = new Date(ends)
+    const label = Number.isNaN(d.getTime())
+      ? 'Limited run'
+      : `Ends ${d.getDate()} ${d.toLocaleString('en-SG', { month: 'short' })}`
+    out.push({
+      key: 'closing_soon',
+      label,
+      chipClass: 'bg-rose-50 text-rose-700 ring-1 ring-rose-200',
+    })
   }
+
+  const opened = typeof meta.opened === 'string' ? meta.opened : null
+  if (opened && daysSince(opened) >= 0 && daysSince(opened) <= JUST_OPENED_WINDOW_DAYS) {
+    out.push({
+      key: 'soft_launch',
+      label: 'Just opened',
+      chipClass: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
+    })
+  }
+
+  if (typeof meta.source === 'string' && meta.source.trim()) {
+    out.push({
+      key: 'critic_pick',
+      label: "Critic's pick",
+      chipClass: 'bg-amber-50 text-amber-800 ring-1 ring-amber-200',
+    })
+  }
+
+  if (typeof meta.award === 'string' && meta.award.trim()) {
+    out.push({
+      key: 'award_fresh',
+      label: 'Award-winning',
+      chipClass: 'bg-violet-50 text-violet-700 ring-1 ring-violet-200',
+    })
+  }
+
+  return out
 }
 
-function badgeLabel(card: PlanCardType): string | null {
-  if (card.badge === 'none') return null
-  if (card.badge === 'closing_soon') {
-    const ends = card.badge_meta?.ends_at as string | undefined
-    if (ends) {
-      const d = new Date(ends)
-      if (!Number.isNaN(d.getTime())) {
-        const mon = d.toLocaleString('en-SG', { month: 'short' })
-        return `Ends ${d.getDate()} ${mon}`
-      }
-    }
-    return 'Limited run'
-  }
-  if (card.badge === 'soft_launch') return 'Just opened'
-  if (card.badge === 'critic_pick') return "Critic's pick"
-  if (card.badge === 'award_fresh') return 'Award-winning'
-  return null
+function daysFromNow(iso: string): number {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return -1
+  return Math.round((d.getTime() - Date.now()) / 86_400_000)
 }
 
-function composeWhy(card: PlanCardType, profile: Profile): string {
+function daysSince(iso: string): number {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return -1
+  return Math.round((Date.now() - d.getTime()) / 86_400_000)
+}
+
+function composeWhy(card: PlanCardType, profile: Profile, labels: CardLabel[]): string {
   const event = isEvent(card)
   const lovedHit = card.cuisine_tags.find((c) => profile.cuisines_loved.includes(c))
   const vibes = profile.vibe_defaults ?? []
@@ -309,39 +334,74 @@ function composeWhy(card: PlanCardType, profile: Profile): string {
         ? `${capitalize(vibeHit)} mood`
         : `${pretty(card.cuisine_tags[0] ?? 'Dinner')} for two`
 
-  const tail = whyTail(card)
-  return tail ? `${headline} · ${tail}.` : `${headline}.`
+  const tails = whyTails(card, labels)
+  return tails.length > 0 ? `${headline} · ${tails.join(' · ')}.` : `${headline}.`
 }
 
-// Real signal where we have it — concrete dates beat platitudes.
-function whyTail(card: PlanCardType): string | null {
-  switch (card.badge) {
-    case 'closing_soon': {
-      const fmt = formatEndsAt(card.badge_meta?.ends_at as string | undefined)
-      return fmt ? `ends ${fmt}` : 'catch it before it ends'
-    }
-    case 'soft_launch': {
-      const fmt = formatOpened(card.badge_meta?.opened as string | undefined)
-      return fmt ?? 'freshly opened'
-    }
-    case 'critic_pick': {
-      const source = card.badge_meta?.source as string | undefined
-      return source ? `picked by ${source}` : "critic's pick"
-    }
-    case 'award_fresh': {
-      const award = card.badge_meta?.award as string | undefined
-      return award ? award.toLowerCase() : 'recently recognised'
-    }
-    case 'none':
-    default:
-      if (card.trending_score >= TRENDING_THRESHOLD) return trendingTail(card.trending_score)
-      // For events, surface the end date even without a closing_soon badge.
-      if (isEvent(card)) {
-        const fmt = formatEndsAt(card.badge_meta?.ends_at as string | undefined)
-        if (fmt) return `on view until ${fmt}`
+// One short fragment per applicable label, drawing on real metadata. Cap at
+// two so the card body stays inside its line-clamp-3.
+function whyTails(card: PlanCardType, labels: CardLabel[]): string[] {
+  const meta = card.badge_meta ?? {}
+  const tails: string[] = []
+
+  for (const l of labels) {
+    if (tails.length >= 2) break
+    switch (l.key) {
+      case 'closing_soon': {
+        const fmt = formatEndsAt(meta.ends_at as string | undefined)
+        tails.push(fmt ? `ends ${fmt}` : 'catch it before it ends')
+        break
       }
-      return null
+      case 'soft_launch': {
+        const fmt = formatOpened(meta.opened as string | undefined)
+        tails.push(fmt ?? 'freshly opened')
+        break
+      }
+      case 'critic_pick': {
+        const source = typeof meta.source === 'string' ? meta.source : null
+        tails.push(source ? `picked by ${source}` : "critic's pick")
+        break
+      }
+      case 'award_fresh': {
+        const award = typeof meta.award === 'string' ? meta.award : null
+        tails.push(award ? award.toLowerCase() : 'recently recognised')
+        break
+      }
+    }
   }
+
+  if (tails.length === 0) {
+    if (card.trending_score >= TRENDING_THRESHOLD) tails.push(trendingTail(card.trending_score))
+    else if (isEvent(card)) {
+      const fmt = formatEndsAt(card.badge_meta?.ends_at as string | undefined)
+      if (fmt) tails.push(`on view until ${fmt}`)
+    }
+  }
+
+  return tails
+}
+
+function ShareIcon() {
+  // iOS-style share glyph (rect with up-arrow). The previous ↗ codepoint
+  // looked like a generic external-link arrow, which users on this project
+  // flagged as not reading as "share".
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 3v13" />
+      <path d="M8 7l4-4 4 4" />
+      <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+    </svg>
+  )
 }
 
 function formatEndsAt(iso: string | undefined): string | null {

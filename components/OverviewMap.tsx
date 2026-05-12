@@ -24,6 +24,14 @@ const CATEGORY_COLOR: Record<'dining' | 'event', string> = {
   event: '#7c3aed', // violet-600
 }
 
+// Glyphs used inside the venue pin and the legend. Emoji rather than custom
+// SVGs so the icon matches the tab icons on the results header — keeps the
+// "Dining" and "Events" vocabulary visually consistent across surfaces.
+const CATEGORY_GLYPH: Record<'dining' | 'event', string> = {
+  dining: '🍽️',
+  event: '🎟️',
+}
+
 const START_A_COLOR = '#0f766e'
 const START_B_COLOR = '#b45309'
 const SG_CENTER: [number, number] = [103.8198, 1.3521]
@@ -86,7 +94,7 @@ export function OverviewMap({
     ]
 
     for (const { card, category } of allCards) {
-      const el = venueElement(CATEGORY_COLOR[category])
+      const el = venueElement(CATEGORY_COLOR[category], CATEGORY_GLYPH[category])
       el.addEventListener('click', (ev) => {
         ev.stopPropagation()
         onSelect(card)
@@ -138,8 +146,8 @@ export function OverviewMap({
         </div>
       )}
       <div className="pointer-events-none absolute left-3 top-3 flex flex-col gap-1 rounded-xl bg-white/90 px-3 py-2 text-[11px] font-medium text-stone-700 shadow-sm backdrop-blur">
-        <LegendRow color={CATEGORY_COLOR.dining} label="Dining" />
-        <LegendRow color={CATEGORY_COLOR.event} label="Events" />
+        <LegendRow glyph={CATEGORY_GLYPH.dining} label="Dining" />
+        <LegendRow glyph={CATEGORY_GLYPH.event} label="Events" />
       </div>
       <div className="pointer-events-none absolute bottom-1.5 right-2 rounded bg-white/80 px-1.5 py-0.5 text-[9px] font-medium text-stone-500 backdrop-blur">
         © OpenStreetMap
@@ -148,42 +156,49 @@ export function OverviewMap({
   )
 }
 
-function LegendRow({ color, label }: { color: string; label: string }) {
+function LegendRow({ glyph, label }: { glyph: string; label: string }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span
-        className="h-2.5 w-2.5 rounded-full"
-        style={{ background: color, boxShadow: '0 0 0 2px white' }}
-      />
+      <span aria-hidden="true" className="text-sm leading-none">{glyph}</span>
       <span>{label}</span>
     </div>
   )
 }
 
-function venueElement(color: string): HTMLDivElement {
-  // Wrapper positioned by MapLibre; inner dot handles hover scale so we never
-  // clobber MapLibre's translate transform.
+function venueElement(color: string, glyph: string): HTMLDivElement {
+  // Wrapper positioned by MapLibre; inner pill handles hover scale so we
+  // never clobber MapLibre's translate transform. The pill shape gives the
+  // emoji room to breathe — a flat circle squashes the glyph and reads as a
+  // generic dot from a distance.
   const wrapper = document.createElement('div')
-  wrapper.style.cssText = 'width:22px;height:22px;cursor:pointer'
+  wrapper.style.cssText = 'width:30px;height:30px;cursor:pointer'
 
-  const dot = document.createElement('div')
-  dot.style.cssText = [
+  const pin = document.createElement('div')
+  pin.style.cssText = [
     `background:${color}`,
     'width:100%',
     'height:100%',
     'border-radius:50%',
-    'border:3px solid white',
-    'box-shadow:0 2px 8px rgba(0,0,0,0.25)',
+    'border:2px solid white',
+    'box-shadow:0 2px 8px rgba(0,0,0,0.3)',
+    'display:flex',
+    'align-items:center',
+    'justify-content:center',
+    'font-size:15px',
+    'line-height:1',
     'transition:transform 120ms ease',
     'transform-origin:center',
   ].join(';')
-  wrapper.appendChild(dot)
+  // Emoji as plain text — single-character payloads render reliably across
+  // Chromium, Safari, and Firefox without needing a font fallback.
+  pin.textContent = glyph
+  wrapper.appendChild(pin)
 
   wrapper.addEventListener('mouseenter', () => {
-    dot.style.transform = 'scale(1.2)'
+    pin.style.transform = 'scale(1.18)'
   })
   wrapper.addEventListener('mouseleave', () => {
-    dot.style.transform = 'scale(1)'
+    pin.style.transform = 'scale(1)'
   })
   return wrapper
 }

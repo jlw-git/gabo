@@ -123,8 +123,12 @@ type ExtractedVenue = {
   cuisine_tags: string[]
   vibe_tags: string[]
   opens_at: string | null
+  ends_at: string | null
   photo_url: string | null
   is_new_opening: boolean
+  is_limited_run: boolean
+  is_award_winner: boolean
+  award_name: string | null
   // Tri-state: true / false / null (unknown). Lets the planner trust this
   // when the article is explicit and fall back to the regex when not.
   accepts_reservations: boolean | null
@@ -148,6 +152,13 @@ export type BlogScanSummary = {
 // last_synced_at as the proxy for "still being talked about": if the scanner
 // stopped seeing a venue in feeds for 90 days, its soft_launch badge is stale.
 const SOFT_LAUNCH_TTL_DAYS = 90
+// Award badges decay more slowly — Michelin / Asia's 50 Best lists publish
+// roughly yearly and a venue that lost the award rarely loses it overnight.
+const AWARD_FRESH_TTL_DAYS = 365
+// Critic-pick is recomputed every run from cross-blog mention counts, so no
+// TTL is needed — a venue stops being a critic_pick the next run after
+// mentions drop below the threshold.
+const CRITIC_PICK_MIN_BLOGS = 3
 
 // Default hours by cuisine — blog posts almost never include opening hours
 // in a parseable form, but the planner requires hours_json to surface a
@@ -344,8 +355,12 @@ Return every Singapore restaurant, café, bar, or food venue clearly described i
 - cuisine_tags: 1–3 tags from ONLY this list: ${CUISINE_TAGS.join(', ')}
 - vibe_tags: 0–2 tags from ONLY: cozy, adventurous, celebratory, low_key
 - opens_at: opening date as YYYY-MM-DD if the article explicitly states one (e.g. "opens 15 March 2026", "soft-launched last week", "just opened in May"). Use null if the article doesn't state an opening date — DO NOT guess from the article's publication date.
+- ends_at: closing date as YYYY-MM-DD if the article says the venue or pop-up is time-limited and ends on a specific date (e.g. "pop-up runs until 30 June", "limited engagement through 15 May", "last day 12 Apr", "chef's residency ends 1 March"). Use null if the venue is permanent or no end date is given. DO NOT guess.
 - photo_url: the URL most clearly tied to this venue from the list above. MUST exactly match one of the URLs listed. Use null if none clearly applies.
 - is_new_opening: true ONLY if the article explicitly says the venue opened recently (within ~6 months) AND you can extract a concrete opens_at date. Set false for general reviews of established venues, "best of" round-ups, or anniversary write-ups. When uncertain, default to false.
+- is_limited_run: true ONLY if the article frames the venue as time-limited (pop-up, residency, chef takeover, limited engagement, seasonal stall) AND you can extract a concrete ends_at date. Set false for permanent venues even if they have temporary menus or one-off events. When uncertain, default to false.
+- is_award_winner: true ONLY if THIS article is explicitly a write-up about a prestigious culinary award or list naming this venue — Michelin Guide Singapore (star or Bib Gourmand), Asia's 50 Best Restaurants, World's 50 Best Restaurants, World Gourmet Awards, World Gourmet Summit, or Tatler Dining. Set false for general reviews even if the venue is famous, and false for round-ups that don't mention an award by name. When uncertain, default to false.
+- award_name: short label for the award (e.g. "Michelin star 2026", "Michelin Bib Gourmand 2025", "Asia's 50 Best #12 2025", "World Gourmet Award 2026"). Use null when is_award_winner is false.
 - accepts_reservations: true / false / null based on what the article says about booking.
     - true: the article mentions reservations, bookings, a reservation phone line, Chope/SevenRooms/OpenTable, "book a table", "reservations recommended", or describes the venue as a sit-down restaurant where bookings are clearly typical.
     - false: the article explicitly says the venue is walk-in only, "no reservations", "first-come first-served", "queue", or describes it as a hawker stall, food-court tenant, kopitiam, coffee shop, or a small zi char / sliced-fish / bak kut teh / chicken-rice / laksa / prata-style stall where reservations are not taken.
@@ -355,7 +370,7 @@ Skip venues outside Singapore. Skip venues mentioned only in passing without eno
 
 Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
 [
-  { "name": "...", "address": "...", "cuisine_tags": [...], "vibe_tags": [...], "opens_at": null, "photo_url": null, "is_new_opening": false, "accepts_reservations": null }
+  { "name": "...", "address": "...", "cuisine_tags": [...], "vibe_tags": [...], "opens_at": null, "ends_at": null, "photo_url": null, "is_new_opening": false, "is_limited_run": false, "is_award_winner": false, "award_name": null, "accepts_reservations": null }
 ]`
 
   const result = await ai.models.generateContent({
@@ -402,6 +417,8 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
 
     const opens_at =
       typeof v.opens_at === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.opens_at) ? v.opens_at : null
+    const ends_at =
+      typeof v.ends_at === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.ends_at) ? v.ends_at : null
 
     // Photo: only accept Gemini's pick if it's actually in the article (defends
     // against URL hallucination). For single-venue posts, fall back to og:image.
@@ -418,14 +435,24 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
           ? false
           : null
 
+    const is_award_winner = v.is_award_winner === true
+    const award_name =
+      is_award_winner && typeof v.award_name === 'string' && v.award_name.trim()
+        ? v.award_name.trim().slice(0, 80)
+        : null
+
     out.push({
       name: v.name,
       address: v.address,
       cuisine_tags,
       vibe_tags,
       opens_at,
+      ends_at,
       photo_url,
       is_new_opening: v.is_new_opening === true,
+      is_limited_run: v.is_limited_run === true,
+      is_award_winner,
+      award_name,
       accepts_reservations,
     })
   }
@@ -474,21 +501,67 @@ async function resolveAddress(
 
 // ─── Freshness ────────────────────────────────────────────────────────────────
 
-async function ageStaleSoftLaunches(summary: BlogScanSummary): Promise<number> {
-  const cutoff = new Date(Date.now() - SOFT_LAUNCH_TTL_DAYS * 86400_000).toISOString()
+// Age out time-sensitive badges. Called once per run before any extraction so
+// stale rows show up correctly even if no new article mentions them.
+//   - soft_launch  → none after SOFT_LAUNCH_TTL_DAYS without a fresh mention
+//   - award_fresh  → none after AWARD_FRESH_TTL_DAYS without a fresh mention
+//   - closing_soon → none once its badge_meta.ends_at has passed
+async function ageStaleBadges(summary: BlogScanSummary): Promise<number> {
   const supabase = createServiceRoleClient()
-  const { data, error } = await supabase
+  let agedOut = 0
+
+  const softCutoff = new Date(Date.now() - SOFT_LAUNCH_TTL_DAYS * 86400_000).toISOString()
+  const softRes = await supabase
     .from('venues')
     .update({ badge: 'none' })
     .eq('source', 'editorial')
     .eq('badge', 'soft_launch')
-    .lt('last_synced_at', cutoff)
+    .lt('last_synced_at', softCutoff)
     .select('id')
-  if (error) {
-    summary.errors.push(`age-out: ${error.message}`)
-    return 0
+  if (softRes.error) summary.errors.push(`age-out soft_launch: ${softRes.error.message}`)
+  else agedOut += softRes.data?.length ?? 0
+
+  const awardCutoff = new Date(Date.now() - AWARD_FRESH_TTL_DAYS * 86400_000).toISOString()
+  const awardRes = await supabase
+    .from('venues')
+    .update({ badge: 'none' })
+    .eq('source', 'editorial')
+    .eq('badge', 'award_fresh')
+    .lt('last_synced_at', awardCutoff)
+    .select('id')
+  if (awardRes.error) summary.errors.push(`age-out award_fresh: ${awardRes.error.message}`)
+  else agedOut += awardRes.data?.length ?? 0
+
+  // closing_soon: load editorial rows and flip any whose badge_meta.ends_at is
+  // before today. Doing this in JS avoids relying on Postgres JSONB date
+  // arithmetic and the row count is small (low hundreds).
+  const today = new Date().toISOString().slice(0, 10)
+  const closingRes = await supabase
+    .from('venues')
+    .select('id, badge_meta')
+    .eq('source', 'editorial')
+    .eq('badge', 'closing_soon')
+  if (closingRes.error) {
+    summary.errors.push(`age-out closing_soon load: ${closingRes.error.message}`)
+  } else {
+    const expiredIds: string[] = []
+    for (const row of (closingRes.data ?? []) as { id: string; badge_meta: Record<string, unknown> | null }[]) {
+      const endsAt = row.badge_meta?.ends_at
+      if (typeof endsAt !== 'string') continue
+      if (endsAt < today) expiredIds.push(row.id)
+    }
+    if (expiredIds.length > 0) {
+      const upd = await supabase
+        .from('venues')
+        .update({ badge: 'none' })
+        .in('id', expiredIds)
+        .select('id')
+      if (upd.error) summary.errors.push(`age-out closing_soon update: ${upd.error.message}`)
+      else agedOut += upd.data?.length ?? 0
+    }
   }
-  return data?.length ?? 0
+
+  return agedOut
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -512,7 +585,7 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
     return summary
   }
 
-  summary.aged_out = await ageStaleSoftLaunches(summary)
+  summary.aged_out = await ageStaleBadges(summary)
 
   type VenueRow = {
     source: 'editorial'
@@ -531,9 +604,15 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
     chope_url: string | null
     hours_json: ReturnType<typeof buildDefaultHoursJson>
     ph_hours_json: null
-    badge: 'soft_launch' | 'none'
+    // critic_pick is set in a second pass from cross-blog mention counts; the
+    // per-article extractor never emits it directly.
+    badge: 'closing_soon' | 'soft_launch' | 'award_fresh' | 'none'
     badge_meta: {
       opened?: string | null
+      ends_at?: string | null
+      starts_at?: string | null
+      award?: string | null
+      source?: string | null
       reason?: string
       hours_source: 'default'
     }
@@ -616,12 +695,35 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
         if (seenIds.has(source_id)) continue
         seenIds.add(source_id)
 
-        // Require BOTH is_new_opening AND a parseable opens_at before badging
-        // as soft_launch. Falling back to the article's pubDate produced
-        // misleading "opened 3 days ago" copy for established venues that
-        // happened to be reviewed recently (e.g. Lucine by LUNA showing as
-        // "opened 3 days ago" when it has been open for months).
+        // is_new_opening / is_limited_run require BOTH the flag AND a parseable
+        // date — falling back to the article's pubDate produced misleading
+        // "opened 3 days ago" copy for established venues that happened to be
+        // reviewed recently (e.g. Lucine by LUNA showing as "opened 3 days ago"
+        // when it has been open for months).
+        const isLimited =
+          venue.is_limited_run && Boolean(venue.ends_at) && (venue.ends_at as string) >= new Date().toISOString().slice(0, 10)
         const isNew = venue.is_new_opening && Boolean(venue.opens_at)
+        const isAward = venue.is_award_winner && Boolean(venue.award_name)
+
+        // Always carry every signal that applies in badge_meta so PlanCard can
+        // render multiple labels (a Michelin pop-up that opened last week
+        // should chip as Award-winning + Just opened + Limited run). The
+        // primary `badge` column picks one winner — used for ring colour and
+        // the freshness score weight in lib/planner/score.ts — but the meta
+        // is the source of truth for label rendering.
+        // Priority: closing_soon > soft_launch > award_fresh (critic_pick set
+        // in a second pass).
+        const badgeMeta: VenueRow['badge_meta'] = { hours_source: 'default' }
+        if (isLimited) badgeMeta.ends_at = venue.ends_at
+        if (isNew) badgeMeta.opened = venue.opens_at
+        if (isAward) badgeMeta.award = venue.award_name
+
+        let badge: VenueRow['badge']
+        if (isLimited) badge = 'closing_soon'
+        else if (isNew) badge = 'soft_launch'
+        else if (isAward) badge = 'award_fresh'
+        else badge = 'none'
+
         toInsert.push({
           source: 'editorial',
           source_id,
@@ -639,14 +741,8 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
           chope_url: null,
           hours_json: buildDefaultHoursJson(venue.cuisine_tags),
           ph_hours_json: null,
-          badge: isNew ? 'soft_launch' : 'none',
-          badge_meta: isNew
-            ? {
-                opened: venue.opens_at as string,
-                reason: `${blog.name} new opening`,
-                hours_source: 'default',
-              }
-            : { hours_source: 'default' },
+          badge,
+          badge_meta: badgeMeta,
           trending_score: 0,
           active: true,
           accepts_reservations: venue.accepts_reservations,
@@ -683,5 +779,116 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
     }
   }
 
+  await applyCriticPickBadges(summary)
+
   return summary
+}
+
+// ─── Cross-blog critic_pick ──────────────────────────────────────────────────
+//
+// Editorial venues are upserted per-blog with prefixed source_ids
+// (sethlui-burnt-ends, dfd-burnt-ends, …) so cross-blog dedup isn't part of
+// the upsert path. Instead, after each run we recompute the mention count per
+// normalised venue name and promote any venue with mentions from ≥3 distinct
+// blogs to badge='critic_pick'. Higher-priority badges (closing_soon,
+// soft_launch) are preserved; award_fresh is preserved across the round-trip
+// via badge_meta.award so a demotion can restore it.
+function normalizeVenueName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function prefixForSourceId(sourceId: string): string | null {
+  for (const b of BLOGS) {
+    if (sourceId.startsWith(`${b.prefix}-`)) return b.prefix
+  }
+  return null
+}
+
+function blogNameForPrefix(prefix: string): string {
+  return BLOGS.find((b) => b.prefix === prefix)?.name ?? prefix
+}
+
+type EditorialBadgeRow = {
+  id: string
+  name: string
+  source_id: string
+  cuisine_tags: string[] | null
+  badge: 'closing_soon' | 'soft_launch' | 'critic_pick' | 'award_fresh' | 'none'
+  badge_meta: Record<string, unknown> | null
+}
+
+async function applyCriticPickBadges(summary: BlogScanSummary): Promise<void> {
+  const supabase = createServiceRoleClient()
+  const { data, error } = await supabase
+    .from('venues')
+    .select('id, name, source_id, cuisine_tags, badge, badge_meta')
+    .eq('source', 'editorial')
+  if (error) {
+    summary.errors.push(`critic_pick load: ${error.message}`)
+    return
+  }
+  const rows = (data ?? []) as EditorialBadgeRow[]
+
+  // Group rows by normalised name → set of distinct blog prefixes. Exclude
+  // events (cuisine_tags contains 'experience') so a TSL event doesn't
+  // accidentally count toward a dining venue's blog-mention tally.
+  const groups = new Map<string, { prefixes: Set<string>; rows: EditorialBadgeRow[] }>()
+  for (const row of rows) {
+    const prefix = prefixForSourceId(row.source_id)
+    if (!prefix) continue // ignore non-blog editorial rows (museum agent etc.)
+    if ((row.cuisine_tags ?? []).includes('experience')) continue
+    const key = normalizeVenueName(row.name)
+    if (!key) continue
+    let g = groups.get(key)
+    if (!g) {
+      g = { prefixes: new Set(), rows: [] }
+      groups.set(key, g)
+    }
+    g.prefixes.add(prefix)
+    g.rows.push(row)
+  }
+
+  // Every row in a qualifying group gets badge_meta.source = "<blogs>" so the
+  // PlanCard can show a "Critic's pick" chip alongside any higher-priority
+  // chip (closing_soon / soft_launch) — that is, the source tag is a label
+  // signal, not just a badge value. The primary `badge` column is only
+  // changed when the new value is a strict upgrade or a needed demotion.
+  for (const { prefixes, rows: groupRows } of groups.values()) {
+    const qualifies = prefixes.size >= CRITIC_PICK_MIN_BLOGS
+    const sourceLabel = [...prefixes].map(blogNameForPrefix).sort().join(', ')
+
+    for (const row of groupRows) {
+      const currentMeta = row.badge_meta ?? {}
+      if (qualifies) {
+        const sourceMatches = currentMeta.source === sourceLabel
+        const shouldUpgradeBadge =
+          row.badge === 'award_fresh' || row.badge === 'none'
+        if (sourceMatches && !shouldUpgradeBadge) continue
+        const meta: Record<string, unknown> = { ...currentMeta, source: sourceLabel }
+        const nextBadge = shouldUpgradeBadge ? 'critic_pick' : row.badge
+        const upd = await supabase
+          .from('venues')
+          .update({ badge: nextBadge, badge_meta: meta })
+          .eq('id', row.id)
+        if (upd.error) summary.errors.push(`critic_pick promote ${row.id}: ${upd.error.message}`)
+      } else if (typeof currentMeta.source === 'string') {
+        // No longer qualifies: strip the source tag, and demote the badge if
+        // critic_pick was the only thing keeping the row off `none`.
+        const meta: Record<string, unknown> = { ...currentMeta }
+        delete meta.source
+        let nextBadge = row.badge
+        if (row.badge === 'critic_pick') {
+          nextBadge = typeof currentMeta.award === 'string' ? 'award_fresh' : 'none'
+        }
+        const upd = await supabase
+          .from('venues')
+          .update({ badge: nextBadge, badge_meta: meta })
+          .eq('id', row.id)
+        if (upd.error) summary.errors.push(`critic_pick demote ${row.id}: ${upd.error.message}`)
+      }
+    }
+  }
 }

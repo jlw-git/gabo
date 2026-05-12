@@ -1,16 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#fef3c7"/>
-      <stop offset="100%" stop-color="#fde68a"/>
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#b45309"/>
     </linearGradient>
   </defs>
   <rect width="800" height="500" fill="url(#bg)"/>
-  <g stroke="#92400e" stroke-opacity="0.55" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <g stroke="#ffffff" stroke-opacity="0.9" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
     <path d="M 340 160 L 460 160 L 400 240 Z"/>
     <line x1="400" y1="240" x2="400" y2="290"/>
     <line x1="370" y1="290" x2="430" y2="290"/>
   </g>
-  <circle cx="430" cy="178" r="6" fill="#92400e" fill-opacity="0.55"/>
-  <text x="400" y="395" text-anchor="middle" font-family="system-ui, -apple-system, BlinkMacSystemFont, sans-serif" font-size="22" font-weight="700" letter-spacing="6" fill="#92400e" fill-opacity="0.55">BAR</text>
+  <circle cx="430" cy="178" r="6" fill="#ffffff" fill-opacity="0.9"/>
+  <text x="400" y="395" text-anchor="middle" font-family="system-ui, -apple-system, BlinkMacSystemFont, sans-serif" font-size="22" font-weight="700" letter-spacing="6" fill="#ffffff" fill-opacity="0.9">BAR</text>
 </svg>

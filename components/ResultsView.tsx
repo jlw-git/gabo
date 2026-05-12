@@ -66,8 +66,10 @@ export function ResultsView({
   const [tab, setTab] = useState<Tab>('dining')
   const [filter, setFilter] = useState<Filter>('all')
   const [shortlist, setShortlist] = useState<Set<string>>(new Set())
-  const initialMode: TransitMode = profile.transit_pref === 'mrt' ? 'transit' : 'drive'
-  const [mode, setMode] = useState<TransitMode>(initialMode)
+  // Transit-first by default — most SG date-night searches happen for people
+  // taking the MRT, not driving. The profile.transit_pref signal is too weak
+  // to override that (it's a one-off onboarding chip that few users revisit).
+  const [mode, setMode] = useState<TransitMode>('transit')
 
   // Hydrate shortlist from localStorage once on mount.
   useEffect(() => {
@@ -89,8 +91,14 @@ export function ResultsView({
   }
 
   const totalCards = buckets.dining.length + buckets.events.length
-  const plannerLabel = profile.planner_name?.trim() || 'You'
-  const partnerLabel = profile.partner_name?.trim() || 'Partner'
+  // Prefer the start-point name in the ETA pill — "Tampines MRT" / "Buona
+  // Vista" reads more concretely than "You" / "Partner", and matches the map
+  // labels the user just picked. Fall back to the user's name from onboarding
+  // when no start point was provided, and finally to "You" / "Partner".
+  // Use `||` (not `??`) so empty strings — which are what the auto-skipped
+  // onboarding writes to planner_name / partner_name — also fall through.
+  const plannerLabel = truncateLabel(startA?.label || profile.planner_name?.trim() || 'You')
+  const partnerLabel = truncateLabel(startB?.label || profile.partner_name?.trim() || 'Partner')
 
   const allCards = useMemo(
     () => [...buckets.dining, ...buckets.events],
@@ -133,7 +141,9 @@ export function ResultsView({
             minute: '2-digit',
             hour12: true,
           })}
-          {startA && startB && ' · midway between you both'}
+          {startA && startB && ` · between ${plannerLabel} and ${partnerLabel}`}
+          {startA && !startB && ` · from ${plannerLabel}`}
+          {!startA && startB && ` · from ${partnerLabel}`}
           {!startA && !startB && ' · islandwide'}
         </p>
       </header>
@@ -151,13 +161,15 @@ export function ResultsView({
       {totalCards > 0 && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <CategoryTabs
-              active={tab}
-              onChange={setTab}
-              counts={{ dining: buckets.dining.length, events: buckets.events.length }}
-            />
             <div className="flex flex-wrap items-center gap-2">
+              <CategoryTabs
+                active={tab}
+                onChange={setTab}
+                counts={{ dining: buckets.dining.length, events: buckets.events.length }}
+              />
               {showEtaToggle && <EtaModeToggle mode={mode} onChange={setMode} />}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
               <div
                 className="inline-flex rounded-full bg-stone-100 p-1 ring-1 ring-stone-200"
                 role="tablist"
@@ -587,4 +599,13 @@ function ViewTab({ active, onClick, label }: { active: boolean; onClick: () => v
       {label}
     </button>
   )
+}
+
+// Keep ETA-pill labels readable on narrow cards — anything longer than this
+// runs into the minute count. SG place names from OneMap are often verbose
+// ("MARINA BAY FINANCIAL CENTRE TOWER 3"); truncate to a single token-ish
+// length with an ellipsis.
+function truncateLabel(s: string, max = 18): string {
+  if (s.length <= max) return s
+  return `${s.slice(0, max - 1).trimEnd()}…`
 }
