@@ -38,9 +38,15 @@ import { createServiceRoleClient } from '@/lib/supabase/server'
 
 type RssItem = { title: string; url: string; pubDate: Date }
 
+type BlogKind = 'dining' | 'experience'
+
 type BlogConfig = {
   name: string
   prefix: string // short prefix for source_id, e.g. 'sethlui'
+  // 'dining' blogs are extracted into dining catalog rows.
+  // 'experience' blogs are extracted into editorial event rows (cuisine_tags
+  // starts with 'experience' so the planner's isEvent() picks them up).
+  kind: BlogKind
   discover: () => Promise<RssItem[]>
 }
 
@@ -48,6 +54,7 @@ const BLOGS: BlogConfig[] = [
   {
     name: 'Seth Lui',
     prefix: 'sethlui',
+    kind: 'dining',
     // Food-section feed only — the main /feed/ surfaces lots of non-food
     // content (lifestyle guides, gift round-ups) that wastes Gemini calls.
     discover: () => fetchFeedItems('https://sethlui.com/section/food/feed/'),
@@ -55,6 +62,7 @@ const BLOGS: BlogConfig[] = [
   {
     name: 'Daniel Food Diary',
     prefix: 'dfd',
+    kind: 'dining',
     // Article URLs follow /YYYY/MM/DD/slug/ — pubDate is parseable from path.
     discover: () =>
       fetchHtmlListing(
@@ -65,6 +73,7 @@ const BLOGS: BlogConfig[] = [
   {
     name: 'Miss Tam Chiak',
     prefix: 'mtc',
+    kind: 'dining',
     // Sitemap is roughly newest-first; we cap to MAX_ARTICLES_PER_BLOG via
     // the main loop, so older entries simply never get processed.
     discover: () =>
@@ -79,16 +88,27 @@ const BLOGS: BlogConfig[] = [
   {
     name: 'Ladyironchef',
     prefix: 'lic',
+    kind: 'dining',
     discover: () => fetchFeedItems('https://www.ladyironchef.com/feed/'),
   },
   {
     name: 'The Smart Local',
     prefix: 'tsl',
+    kind: 'dining',
     // WordPress per-category RSS — covers Food Guides (roundups) + Food
     // Reviews (single-venue posts) under the parent "Food" category. The
     // existing extractor handles both shapes via the prompt's
     // "single review OR roundup" clause.
     discover: () => fetchFeedItems('https://thesmartlocal.com/category/food-things-to-do/feed/'),
+  },
+  {
+    name: 'TSL Things To Do',
+    prefix: 'tsl-todo',
+    kind: 'experience',
+    // Covers SG events, pop-ups, indie shops, attractions, fairs, workshops,
+    // and night-time activities — the layer that fills the events catalog
+    // beyond museum exhibitions and Bandsintown concerts.
+    discover: () => fetchFeedItems('https://thesmartlocal.com/category/things-to-do/feed/'),
   },
 ]
 
@@ -115,6 +135,17 @@ const CUISINE_TAGS = [
   'dessert', 'bakery', 'seafood', 'omakase', 'pizza', 'bar',
 ]
 
+// Tag vocabulary for experience venues (non-dining). The literal 'experience'
+// is added to every row's cuisine_tags as the planner's category marker
+// (see lib/planner/category.ts#isEvent); the rest narrow what kind of
+// experience it is and drive default-hours selection.
+const EXPERIENCE_TAGS = [
+  'art', 'exhibition', 'music', 'theatre', 'nightlife',
+  'shopping', 'bookstore', 'market', 'pop_up', 'fair',
+  'workshop', 'class', 'wellness', 'games', 'sport',
+  'nature', 'outdoor', 'family',
+]
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ExtractedVenue = {
@@ -132,6 +163,26 @@ type ExtractedVenue = {
   // Tri-state: true / false / null (unknown). Lets the planner trust this
   // when the article is explicit and fall back to the regex when not.
   accepts_reservations: boolean | null
+}
+
+type ExtractedExperience = {
+  name: string
+  address: string
+  // Experience-specific subset of EXPERIENCE_TAGS (the literal 'experience'
+  // is prepended by toExperienceRow, callers don't include it here).
+  experience_tags: string[]
+  vibe_tags: string[]
+  // For limited-run events (pop-ups, fairs, light shows, seasonal markets) —
+  // when both are set the planner's isInRunWindow date-gates the venue.
+  starts_at: string | null
+  ends_at: string | null
+  // For permanent venues that recently opened (new indie bookstore, new
+  // attraction) — drives the soft_launch badge.
+  opens_at: string | null
+  photo_url: string | null
+  is_new_opening: boolean
+  is_limited_run: boolean
+  is_outdoor: boolean
 }
 
 export type BlogScanSummary = {
@@ -178,7 +229,47 @@ function defaultHoursFor(cuisineTags: string[]): { open: string; close: string }
   return DEFAULT_HOURS.dining
 }
 
+// Experience-typed defaults — generously bracket the slot most users search
+// for (evenings). Pop-ups + nightlife stretch to 23:00 so a 22:00 query still
+// matches them; daytime-only formats (workshops, markets) close at 22:00 too
+// so a borderline 21:30 query doesn't get filtered out.
+const DEFAULT_EXPERIENCE_HOURS = {
+  nightlife: { open: '1800', close: '0200' },
+  market: { open: '1100', close: '2200' },
+  shopping: { open: '1100', close: '2100' },
+  workshop: { open: '1000', close: '2200' },
+  outdoor: { open: '0900', close: '2200' },
+  default: { open: '1000', close: '2200' },
+} as const
+
+function defaultHoursForExperience(experienceTags: string[]): { open: string; close: string } {
+  if (experienceTags.some((t) => t === 'nightlife' || t === 'music')) {
+    return DEFAULT_EXPERIENCE_HOURS.nightlife
+  }
+  if (experienceTags.some((t) => t === 'market' || t === 'fair' || t === 'pop_up')) {
+    return DEFAULT_EXPERIENCE_HOURS.market
+  }
+  if (experienceTags.some((t) => t === 'shopping' || t === 'bookstore')) {
+    return DEFAULT_EXPERIENCE_HOURS.shopping
+  }
+  if (experienceTags.some((t) => t === 'workshop' || t === 'class' || t === 'wellness')) {
+    return DEFAULT_EXPERIENCE_HOURS.workshop
+  }
+  if (experienceTags.some((t) => t === 'outdoor' || t === 'nature')) {
+    return DEFAULT_EXPERIENCE_HOURS.outdoor
+  }
+  return DEFAULT_EXPERIENCE_HOURS.default
+}
+
 const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
+
+function buildExperienceHoursJson(experienceTags: string[]) {
+  const w = defaultHoursForExperience(experienceTags)
+  const out: Record<string, { open: string; close: string }[]> = {}
+  for (const d of ALL_DAYS) out[d] = [w]
+  return out
+}
+
 function buildDefaultHoursJson(cuisineTags: string[]) {
   const w = defaultHoursFor(cuisineTags)
   const out: Record<string, { open: string; close: string }[]> = {}
@@ -459,6 +550,132 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
   return out
 }
 
+// Experience extractor — runs on blogs with kind='experience'. Lifestyle
+// articles tend to mix permanent venues (new indie bookstore that opened
+// last week) and time-limited events (3-day art market this weekend) in
+// the same roundup, so the prompt has Gemini classify each. The resulting
+// rows are persisted with cuisine_tags=['experience', ...] which the
+// planner reads as "this is an event" (see isEvent() in lib/planner/category.ts).
+async function extractExperiences(
+  blog: BlogConfig,
+  title: string,
+  url: string,
+  text: string,
+  articlePhotoUrl: string | null,
+  articleImageUrls: string[]
+): Promise<ExtractedExperience[]> {
+  const ai = geminiClient()
+
+  const imageList =
+    articleImageUrls.length > 0
+      ? articleImageUrls.map((u, i) => `  ${i}: ${u}`).join('\n')
+      : '  (no images available)'
+
+  const prompt = `You are extracting structured data from a Singapore lifestyle / things-to-do blog post.
+
+Blog: ${blog.name}
+Article title: ${title}
+Article URL: ${url}
+
+Article text (truncated):
+${text}
+
+Available image URLs in this article (you MUST pick photo_url from this list — do not invent URLs):
+${imageList}
+
+Return every Singapore EXPERIENCE venue clearly described in the article — pop-ups, fairs, light shows, art markets, exhibitions outside museums, workshops, indie bookstores, indie retail, attractions, festivals, themed activities, sport experiences (axe-throwing, mini golf, pickleball), wellness studios, night activities. Skip restaurants / cafes / bars unless the article explicitly frames them as an event venue (e.g. "speakeasy hosting a wine-tasting night"). Skip generic listicles that don't point at a specific venue.
+
+For each venue extract:
+- name: the venue's full name as a visitor would search for it
+- address: the most specific Singapore address mentioned (street + district or postal code). Skip venues with no concrete address.
+- experience_tags: 1–3 tags from ONLY this list: ${EXPERIENCE_TAGS.join(', ')}
+- vibe_tags: 0–2 tags from ONLY: cozy, adventurous, celebratory, low_key
+- starts_at: start date as YYYY-MM-DD if the article says the venue / event runs for a specific window (pop-up dates, fair weekend, festival run). Use null if the venue is permanent or no start date is given.
+- ends_at: end date as YYYY-MM-DD if the article says the venue / event has a specific closing date. Use null if the venue is permanent or no end date is given.
+- opens_at: opening date as YYYY-MM-DD if the article explicitly says a PERMANENT venue opened on a specific date (e.g. "new indie bookstore opened 12 March 2026"). Use null for time-limited events (use starts_at instead) or when no opening date is given.
+- photo_url: the URL most clearly tied to this venue from the list above. MUST exactly match one of the URLs listed. Use null if none clearly applies.
+- is_new_opening: true ONLY if the article explicitly says the venue is a PERMANENT new opening within the last ~6 months AND you can extract a concrete opens_at date. Set false for time-limited events.
+- is_limited_run: true ONLY if the article frames the venue / event as time-limited (pop-up, fair, festival, seasonal market, residency) AND you can extract a concrete ends_at date. Set false for permanent venues.
+- is_outdoor: true if the venue is outdoors (park, beach, outdoor market, garden show) so the planner can hide it on rainy evenings; false otherwise.
+
+Skip venues outside Singapore. Skip venues mentioned only in passing without enough detail to plan a visit.
+
+Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
+[
+  { "name": "...", "address": "...", "experience_tags": [...], "vibe_tags": [...], "starts_at": null, "ends_at": null, "opens_at": null, "photo_url": null, "is_new_opening": false, "is_limited_run": false, "is_outdoor": false }
+]`
+
+  const result = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: prompt,
+  })
+
+  const raw = (result.text ?? '').trim()
+  if (!raw) return []
+
+  const jsonMatch = raw.match(/\[[\s\S]*\]/)
+  if (!jsonMatch) return []
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(jsonMatch[0])
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+
+  const out: ExtractedExperience[] = []
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object') continue
+    const v = item as Record<string, unknown>
+    if (typeof v.name !== 'string' || !v.name) continue
+    if (typeof v.address !== 'string' || !v.address) continue
+
+    const experience_tags = Array.isArray(v.experience_tags)
+      ? (v.experience_tags as unknown[])
+          .filter((t): t is string => typeof t === 'string' && EXPERIENCE_TAGS.includes(t))
+          .slice(0, 3)
+      : []
+
+    const vibe_tags = Array.isArray(v.vibe_tags)
+      ? (v.vibe_tags as unknown[])
+          .filter(
+            (t): t is string =>
+              typeof t === 'string' && ['cozy', 'adventurous', 'celebratory', 'low_key'].includes(t)
+          )
+          .slice(0, 2)
+      : []
+
+    const starts_at =
+      typeof v.starts_at === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.starts_at) ? v.starts_at : null
+    const ends_at =
+      typeof v.ends_at === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.ends_at) ? v.ends_at : null
+    const opens_at =
+      typeof v.opens_at === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.opens_at) ? v.opens_at : null
+
+    const allowedImages = new Set(articleImageUrls)
+    const geminiPhoto =
+      typeof v.photo_url === 'string' && allowedImages.has(v.photo_url) ? v.photo_url : null
+    const photo_url =
+      parsed.length === 1 ? (articlePhotoUrl ?? geminiPhoto) : geminiPhoto
+
+    out.push({
+      name: v.name,
+      address: v.address,
+      experience_tags,
+      vibe_tags,
+      starts_at,
+      ends_at,
+      opens_at,
+      photo_url,
+      is_new_opening: v.is_new_opening === true,
+      is_limited_run: v.is_limited_run === true,
+      is_outdoor: v.is_outdoor === true,
+    })
+  }
+  return out
+}
+
 // ─── OneMap address validation ────────────────────────────────────────────────
 
 const SG = { latMin: 1.15, latMax: 1.48, lngMin: 103.6, lngMax: 104.1 }
@@ -587,6 +804,11 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
 
   summary.aged_out = await ageStaleBadges(summary)
 
+  // Both dining and experience rows share this shape; the differences are
+  // entirely in the field VALUES (cuisine_tags carries the literal 'experience'
+  // marker for events, is_outdoor can be true for outdoor experiences, hours
+  // come from the experience defaults). One shape keeps the upsert path
+  // uniform.
   type VenueRow = {
     source: 'editorial'
     source_id: string
@@ -599,7 +821,7 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
     vibe_tags: string[]
     dietary_flags: []
     budget_band: 2
-    is_outdoor: false
+    is_outdoor: boolean
     photo_url: string | null
     chope_url: string | null
     hours_json: ReturnType<typeof buildDefaultHoursJson>
@@ -659,95 +881,193 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
         continue
       }
 
-      let venues: ExtractedVenue[]
-      try {
-        venues = await extractVenues(
-          blog,
-          item.title,
-          item.url,
-          text,
-          articlePhotoUrl,
-          articleImageUrls
-        )
-      } catch (err) {
-        summary.errors.push(
-          `${blog.name} "${item.title}": Gemini error — ${err instanceof Error ? err.message : String(err)}`
-        )
-        continue
-      }
-
-      if (venues.length === 0) continue
-      summary.articles_matched++
-
-      for (const venue of venues) {
-        summary.venues_extracted++
-
-        const location = await resolveAddress(venue.name, venue.address).catch(() => null)
-        if (!location) {
+      if (blog.kind === 'dining') {
+        let venues: ExtractedVenue[]
+        try {
+          venues = await extractVenues(
+            blog,
+            item.title,
+            item.url,
+            text,
+            articlePhotoUrl,
+            articleImageUrls
+          )
+        } catch (err) {
           summary.errors.push(
-            `${blog.name} "${venue.name}": OneMap could not resolve "${venue.address}"`
+            `${blog.name} "${item.title}": Gemini error — ${err instanceof Error ? err.message : String(err)}`
           )
           continue
         }
-        summary.addresses_validated++
 
-        const source_id = `${blog.prefix}-${slugify(venue.name)}`
-        if (seenIds.has(source_id)) continue
-        seenIds.add(source_id)
+        if (venues.length === 0) continue
+        summary.articles_matched++
 
-        // is_new_opening / is_limited_run require BOTH the flag AND a parseable
-        // date — falling back to the article's pubDate produced misleading
-        // "opened 3 days ago" copy for established venues that happened to be
-        // reviewed recently (e.g. Lucine by LUNA showing as "opened 3 days ago"
-        // when it has been open for months).
-        const isLimited =
-          venue.is_limited_run && Boolean(venue.ends_at) && (venue.ends_at as string) >= new Date().toISOString().slice(0, 10)
-        const isNew = venue.is_new_opening && Boolean(venue.opens_at)
-        const isAward = venue.is_award_winner && Boolean(venue.award_name)
+        for (const venue of venues) {
+          summary.venues_extracted++
 
-        // Always carry every signal that applies in badge_meta so PlanCard can
-        // render multiple labels (a Michelin pop-up that opened last week
-        // should chip as Award-winning + Just opened + Limited run). The
-        // primary `badge` column picks one winner — used for ring colour and
-        // the freshness score weight in lib/planner/score.ts — but the meta
-        // is the source of truth for label rendering.
-        // Priority: closing_soon > soft_launch > award_fresh (critic_pick set
-        // in a second pass).
-        const badgeMeta: VenueRow['badge_meta'] = { hours_source: 'default' }
-        if (isLimited) badgeMeta.ends_at = venue.ends_at
-        if (isNew) badgeMeta.opened = venue.opens_at
-        if (isAward) badgeMeta.award = venue.award_name
+          const location = await resolveAddress(venue.name, venue.address).catch(() => null)
+          if (!location) {
+            summary.errors.push(
+              `${blog.name} "${venue.name}": OneMap could not resolve "${venue.address}"`
+            )
+            continue
+          }
+          summary.addresses_validated++
 
-        let badge: VenueRow['badge']
-        if (isLimited) badge = 'closing_soon'
-        else if (isNew) badge = 'soft_launch'
-        else if (isAward) badge = 'award_fresh'
-        else badge = 'none'
+          const source_id = `${blog.prefix}-${slugify(venue.name)}`
+          if (seenIds.has(source_id)) continue
+          seenIds.add(source_id)
 
-        toInsert.push({
-          source: 'editorial',
-          source_id,
-          source_url: item.url,
-          name: venue.name,
-          lat: location.lat,
-          lng: location.lng,
-          address: location.resolvedAddress,
-          cuisine_tags: venue.cuisine_tags,
-          vibe_tags: venue.vibe_tags,
-          dietary_flags: [],
-          budget_band: 2,
-          is_outdoor: false,
-          photo_url: venue.photo_url,
-          chope_url: null,
-          hours_json: buildDefaultHoursJson(venue.cuisine_tags),
-          ph_hours_json: null,
-          badge,
-          badge_meta: badgeMeta,
-          trending_score: 0,
-          active: true,
-          accepts_reservations: venue.accepts_reservations,
-          last_synced_at: new Date().toISOString(),
-        })
+          // is_new_opening / is_limited_run require BOTH the flag AND a parseable
+          // date — falling back to the article's pubDate produced misleading
+          // "opened 3 days ago" copy for established venues that happened to be
+          // reviewed recently (e.g. Lucine by LUNA showing as "opened 3 days ago"
+          // when it has been open for months).
+          const isLimited =
+            venue.is_limited_run && Boolean(venue.ends_at) && (venue.ends_at as string) >= new Date().toISOString().slice(0, 10)
+          const isNew = venue.is_new_opening && Boolean(venue.opens_at)
+          const isAward = venue.is_award_winner && Boolean(venue.award_name)
+
+          // Always carry every signal that applies in badge_meta so PlanCard can
+          // render multiple labels (a Michelin pop-up that opened last week
+          // should chip as Award-winning + Just opened + Limited run). The
+          // primary `badge` column picks one winner — used for ring colour and
+          // the freshness score weight in lib/planner/score.ts — but the meta
+          // is the source of truth for label rendering.
+          // Priority: closing_soon > soft_launch > award_fresh (critic_pick set
+          // in a second pass).
+          const badgeMeta: VenueRow['badge_meta'] = { hours_source: 'default' }
+          if (isLimited) badgeMeta.ends_at = venue.ends_at
+          if (isNew) badgeMeta.opened = venue.opens_at
+          if (isAward) badgeMeta.award = venue.award_name
+
+          let badge: VenueRow['badge']
+          if (isLimited) badge = 'closing_soon'
+          else if (isNew) badge = 'soft_launch'
+          else if (isAward) badge = 'award_fresh'
+          else badge = 'none'
+
+          toInsert.push({
+            source: 'editorial',
+            source_id,
+            source_url: item.url,
+            name: venue.name,
+            lat: location.lat,
+            lng: location.lng,
+            address: location.resolvedAddress,
+            cuisine_tags: venue.cuisine_tags,
+            vibe_tags: venue.vibe_tags,
+            dietary_flags: [],
+            budget_band: 2,
+            is_outdoor: false,
+            photo_url: venue.photo_url,
+            chope_url: null,
+            hours_json: buildDefaultHoursJson(venue.cuisine_tags),
+            ph_hours_json: null,
+            badge,
+            badge_meta: badgeMeta,
+            trending_score: 0,
+            active: true,
+            accepts_reservations: venue.accepts_reservations,
+            last_synced_at: new Date().toISOString(),
+          })
+        }
+      } else {
+        // Experience blog — same pipeline but with the experience extractor and
+        // event-shaped row (cuisine_tags carries the 'experience' marker so the
+        // planner's isEvent() treats the row as an event).
+        let experiences: ExtractedExperience[]
+        try {
+          experiences = await extractExperiences(
+            blog,
+            item.title,
+            item.url,
+            text,
+            articlePhotoUrl,
+            articleImageUrls
+          )
+        } catch (err) {
+          summary.errors.push(
+            `${blog.name} "${item.title}": Gemini error — ${err instanceof Error ? err.message : String(err)}`
+          )
+          continue
+        }
+
+        if (experiences.length === 0) continue
+        summary.articles_matched++
+
+        for (const exp of experiences) {
+          summary.venues_extracted++
+
+          const location = await resolveAddress(exp.name, exp.address).catch(() => null)
+          if (!location) {
+            summary.errors.push(
+              `${blog.name} "${exp.name}": OneMap could not resolve "${exp.address}"`
+            )
+            continue
+          }
+          summary.addresses_validated++
+
+          const source_id = `${blog.prefix}-${slugify(exp.name)}`
+          if (seenIds.has(source_id)) continue
+          seenIds.add(source_id)
+
+          // Date-gate context: editorial-events / tsl-events only badge
+          // closing_soon when the run ends within 30 days. Same convention
+          // here so a 6-month festival isn't flagged "Limited run" for half
+          // a year. starts_at + ends_at are always persisted in badge_meta
+          // when present though — that's what the planner's isInRunWindow
+          // reads to filter out events outside their run window.
+          const today = new Date().toISOString().slice(0, 10)
+          const isLimitedRun = exp.is_limited_run && Boolean(exp.ends_at) && (exp.ends_at as string) >= today
+          const isNewOpening = exp.is_new_opening && Boolean(exp.opens_at)
+          const daysUntilEnd =
+            exp.ends_at ? Math.round((new Date(exp.ends_at).getTime() - Date.now()) / 86_400_000) : Infinity
+          const closingSoon = isLimitedRun && daysUntilEnd <= 30
+
+          const badgeMeta: VenueRow['badge_meta'] = { hours_source: 'default' }
+          if (exp.starts_at) badgeMeta.starts_at = exp.starts_at
+          if (exp.ends_at) badgeMeta.ends_at = exp.ends_at
+          if (isNewOpening) badgeMeta.opened = exp.opens_at
+
+          let badge: VenueRow['badge']
+          if (closingSoon) badge = 'closing_soon'
+          else if (isNewOpening) badge = 'soft_launch'
+          else badge = 'none'
+
+          toInsert.push({
+            source: 'editorial',
+            source_id,
+            source_url: item.url,
+            name: exp.name,
+            lat: location.lat,
+            lng: location.lng,
+            address: location.resolvedAddress,
+            // 'experience' is the category marker the planner's isEvent()
+            // checks for — without it the row would be treated as dining.
+            cuisine_tags: ['experience', ...exp.experience_tags],
+            vibe_tags: exp.vibe_tags,
+            dietary_flags: [],
+            budget_band: 2,
+            is_outdoor: exp.is_outdoor,
+            photo_url: exp.photo_url,
+            // Mirrors editorialEventToVenue / tslEventToVenue: events use the
+            // source page as the "reservation" link, since clicking takes
+            // the user to ticketing / details.
+            chope_url: item.url,
+            hours_json: buildExperienceHoursJson(exp.experience_tags),
+            ph_hours_json: null,
+            badge,
+            badge_meta: badgeMeta,
+            trending_score: 0,
+            active: true,
+            // Workshops, markets, indie shops — booking conventions vary too
+            // widely to guess. Leave unknown and let the UI fall back to the
+            // chope_url heuristic in lib/reservations.ts.
+            accepts_reservations: null,
+            last_synced_at: new Date().toISOString(),
+          })
+        }
       }
     }
   }
