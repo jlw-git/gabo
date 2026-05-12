@@ -6,6 +6,12 @@ import type {
   Profile,
   TransitMode,
 } from '@/lib/planner/types'
+import {
+  hasClosingSoonLabel,
+  hasJustOpenedLabel,
+  isRecommended,
+  TRENDING_THRESHOLD,
+} from '@/lib/planner/badges'
 import { bookingUrl } from '@/lib/booking-url'
 import { loadShortlist, logShortlistEvent, saveShortlist } from '@/lib/shortlist-storage'
 import type { PlaceSelection } from './PlaceSearchInput'
@@ -370,18 +376,19 @@ export function ResultsView({
   )
 }
 
-// Editorial strip: blog-discovered new openings (badge='soft_launch') + Reddit /
-// shortlist-velocity trending. Capped to 3, soft-launch boosted so blog finds
-// surface alongside high-trending venues.
+// Editorial strip: blog-discovered new openings + Reddit / shortlist-velocity
+// trending. Capped to 3, just-opened boosted so blog finds surface alongside
+// high-trending venues. Uses the chip predicates so the strip stays in sync
+// with the Just-opened filter tab.
 function selectFeatured(cards: PlanCardType[]): PlanCardType[] {
   const eligible = cards.filter(
-    (c) => c.badge === 'soft_launch' || c.trending_score >= 0.7
+    (c) => hasJustOpenedLabel(c) || c.trending_score >= TRENDING_THRESHOLD
   )
   return eligible
     .slice()
     .sort((a, b) => {
-      const sa = a.trending_score + (a.badge === 'soft_launch' ? 0.5 : 0)
-      const sb = b.trending_score + (b.badge === 'soft_launch' ? 0.5 : 0)
+      const sa = a.trending_score + (hasJustOpenedLabel(a) ? 0.5 : 0)
+      const sb = b.trending_score + (hasJustOpenedLabel(b) ? 0.5 : 0)
       return sb - sa
     })
     .slice(0, 3)
@@ -392,11 +399,11 @@ function applyFilter(cards: PlanCardType[], filter: Filter, shortlist: Set<strin
     case 'all':
       return cards
     case 'recommended':
-      return cards.filter((c) => c.badge === 'critic_pick' || c.badge === 'award_fresh' || c.trending_score >= 0.7)
+      return cards.filter(isRecommended)
     case 'limited':
-      return cards.filter((c) => c.badge === 'closing_soon')
+      return cards.filter(hasClosingSoonLabel)
     case 'new':
-      return cards.filter((c) => c.badge === 'soft_launch')
+      return cards.filter(hasJustOpenedLabel)
     case 'shortlist':
       return cards.filter((c) => shortlist.has(c.id))
   }
