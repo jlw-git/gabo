@@ -1,3 +1,8 @@
+import {
+  hasClosingSoonLabel,
+  hasJustOpenedLabel,
+  isRecommended,
+} from '@/lib/planner/badges'
 import { isEvent } from '@/lib/planner/category'
 import { scoreWithoutEtas } from '@/lib/planner/score'
 import type { PlanCard, Profile, Venue } from '@/lib/planner/types'
@@ -9,8 +14,6 @@ import { createClient } from '@/lib/supabase/server'
 // horizontal scroll rails: trending, new, limited-run.
 
 const PER_LIST_LIMIT = 6
-const NEW_OPENING_DAYS = 90
-const LIMITED_RUN_DAYS = 30
 
 type Collection = {
   key: 'trending' | 'new' | 'limited'
@@ -32,8 +35,8 @@ export async function GET() {
   const venues = await loadVenues()
   const now = new Date()
   const trending = pickTrending(venues, now)
-  const newOpenings = pickNew(venues, now)
-  const limited = pickLimited(venues, now)
+  const newOpenings = pickNew(venues)
+  const limited = pickLimited(venues)
 
   return Response.json({
     trending: toPlanCards(trending),
@@ -52,13 +55,13 @@ async function loadVenues(): Promise<Venue[]> {
 function pickTrending(venues: Venue[], now: Date): Venue[] {
   return [...venues]
     .filter((v) => {
-      if (v.trending_score >= 0.55 || v.badge === 'critic_pick' || v.badge === 'award_fresh') return true
+      if (isRecommended(v)) return true
       // Surface all upcoming events even if trending_score is 0 — they're
       // time-bounded so any future exhibition is relevant.
       if (isEvent(v)) {
         const ends = v.badge_meta?.ends_at
         if (typeof ends !== 'string' && typeof ends !== 'number') return true
-        return new Date(ends) > now
+        return new Date(ends as string | number) > now
       }
       return false
     })
@@ -66,36 +69,17 @@ function pickTrending(venues: Venue[], now: Date): Venue[] {
     .slice(0, PER_LIST_LIMIT)
 }
 
-function pickNew(venues: Venue[], now: Date): Venue[] {
-  const cutoff = now.getTime() - NEW_OPENING_DAYS * 24 * 60 * 60 * 1000
+function pickNew(venues: Venue[]): Venue[] {
   return [...venues]
-    .filter((v) => {
-      if (v.badge !== 'soft_launch') return false
-      const opened = v.badge_meta?.opened
-      if (typeof opened !== 'string') return true
-      const t = new Date(opened).getTime()
-      return Number.isFinite(t) && t >= cutoff
-    })
+    .filter(hasJustOpenedLabel)
     .sort((a, b) => b.trending_score - a.trending_score)
     .slice(0, PER_LIST_LIMIT)
 }
 
-function pickLimited(venues: Venue[], now: Date): Venue[] {
-  const horizon = now.getTime() + LIMITED_RUN_DAYS * 24 * 60 * 60 * 1000
+function pickLimited(venues: Venue[]): Venue[] {
   return [...venues]
-    .filter((v) => {
-      if (v.badge !== 'closing_soon') return false
-      const ends = v.badge_meta?.ends_at
-      if (typeof ends !== 'string') return true
-      const t = new Date(ends).getTime()
-      // Surface anything ending within the next two weeks. Past dates are
-      return !Number.isFinite(t) || t <= horizon || t >= now.getTime()
-    })
-    .sort((a, b) => {
-      const aEnd = endsAtTime(a)
-      const bEnd = endsAtTime(b)
-      return aEnd - bEnd
-    })
+    .filter(hasClosingSoonLabel)
+    .sort((a, b) => endsAtTime(a) - endsAtTime(b))
     .slice(0, PER_LIST_LIMIT)
 }
 

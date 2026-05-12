@@ -1,5 +1,12 @@
 import type { LatLng, PlanCard as PlanCardType, Profile, TransitMode } from '@/lib/planner/types'
 import { isEvent } from '@/lib/planner/category'
+import {
+  hasAwardLabel,
+  hasClosingSoonLabel,
+  hasCriticPickLabel,
+  hasJustOpenedLabel,
+  TRENDING_THRESHOLD,
+} from '@/lib/planner/badges'
 import { directionsUrl } from '@/lib/directions'
 import { photoUrlOrFallback } from '@/lib/photo-fallback'
 import { acceptsReservations } from '@/lib/reservations'
@@ -26,8 +33,6 @@ type Props = {
   onShare?: (card: PlanCardType) => void
   onToggleShortlist?: (card: PlanCardType) => void
 }
-
-const TRENDING_THRESHOLD = 0.7
 
 export function PlanCard({
   card,
@@ -256,19 +261,15 @@ function ringForBadge(card: PlanCardType): { base: string; hover: string } {
 type LabelKey = 'closing_soon' | 'soft_launch' | 'critic_pick' | 'award_fresh'
 type CardLabel = { key: LabelKey; label: string; chipClass: string }
 
-// Multi-label rendering. Cards now show every applicable badge chip, sourced
-// from badge_meta (not from the single `badge` column). Order matches the
-// freshness priority in lib/planner/score.ts so the most time-sensitive
-// label appears first when several apply.
-const CLOSING_SOON_WINDOW_DAYS = 30
-const JUST_OPENED_WINDOW_DAYS = 90 // dining; events use 14 but a 90-day cap is fine for label purposes since blog-scanner soft_launch is bounded by SOFT_LAUNCH_TTL_DAYS
-
+// Multi-label rendering. Cards show every applicable badge chip, keying off
+// the same predicates the filter tabs use (lib/planner/badges.ts). A chip
+// visible on a card always implies the card appears under the matching
+// filter tab — the two surfaces can't disagree.
 function badgeLabels(card: PlanCardType): CardLabel[] {
-  const meta = card.badge_meta ?? {}
   const out: CardLabel[] = []
 
-  const ends = typeof meta.ends_at === 'string' ? meta.ends_at : null
-  if (ends && daysFromNow(ends) >= 0 && daysFromNow(ends) <= CLOSING_SOON_WINDOW_DAYS) {
+  if (hasClosingSoonLabel(card)) {
+    const ends = card.badge_meta?.ends_at as string
     const d = new Date(ends)
     const label = Number.isNaN(d.getTime())
       ? 'Limited run'
@@ -280,8 +281,7 @@ function badgeLabels(card: PlanCardType): CardLabel[] {
     })
   }
 
-  const opened = typeof meta.opened === 'string' ? meta.opened : null
-  if (opened && daysSince(opened) >= 0 && daysSince(opened) <= JUST_OPENED_WINDOW_DAYS) {
+  if (hasJustOpenedLabel(card)) {
     out.push({
       key: 'soft_launch',
       label: 'Just opened',
@@ -289,7 +289,7 @@ function badgeLabels(card: PlanCardType): CardLabel[] {
     })
   }
 
-  if (typeof meta.source === 'string' && meta.source.trim()) {
+  if (hasCriticPickLabel(card)) {
     out.push({
       key: 'critic_pick',
       label: "Critic's pick",
@@ -297,7 +297,7 @@ function badgeLabels(card: PlanCardType): CardLabel[] {
     })
   }
 
-  if (typeof meta.award === 'string' && meta.award.trim()) {
+  if (hasAwardLabel(card)) {
     out.push({
       key: 'award_fresh',
       label: 'Award-winning',
@@ -306,18 +306,6 @@ function badgeLabels(card: PlanCardType): CardLabel[] {
   }
 
   return out
-}
-
-function daysFromNow(iso: string): number {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return -1
-  return Math.round((d.getTime() - Date.now()) / 86_400_000)
-}
-
-function daysSince(iso: string): number {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return -1
-  return Math.round((Date.now() - d.getTime()) / 86_400_000)
 }
 
 function composeWhy(card: PlanCardType, profile: Profile, labels: CardLabel[]): string {

@@ -2,6 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { PlanCard as PlanCardType, Profile, TransitMode } from '@/lib/planner/types'
+import {
+  hasClosingSoonLabel,
+  hasJustOpenedLabel,
+  isRecommended,
+} from '@/lib/planner/badges'
 import { bookingUrl } from '@/lib/booking-url'
 import { loadShortlist, logShortlistEvent, saveShortlist } from '@/lib/shortlist-storage'
 import { PlanCard } from './PlanCard'
@@ -39,13 +44,11 @@ function applyFilter(cards: PlanCardType[], filter: Filter, shortlist: Set<strin
     case 'all':
       return cards
     case 'recommended':
-      return cards.filter(
-        (c) => c.badge === 'critic_pick' || c.badge === 'award_fresh' || c.trending_score >= 0.7
-      )
+      return cards.filter(isRecommended)
     case 'limited':
-      return cards.filter((c) => c.badge === 'closing_soon')
+      return cards.filter(hasClosingSoonLabel)
     case 'new':
-      return cards.filter((c) => c.badge === 'soft_launch')
+      return cards.filter(hasJustOpenedLabel)
     case 'shortlist':
       return cards.filter((c) => shortlist.has(c.id))
   }
