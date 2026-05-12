@@ -9,8 +9,8 @@ Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + Supabase (Postgr
 
 ## Current build state
 - Supabase live. Per-row `source`/`source_url` columns drive UI attribution. Hand-seeded `source='manual'` rows wiped via `/api/admin/reseed`.
-- **Dining catalog** is meant to come from Google Places (with Foursquare fallback). **Both API providers are currently blocked** — Google Places returns 403 `API_KEY_HTTP_REFERRER_BLOCKED`, Foursquare returns 402 (out of credits). The blog scanner (Sethlui food-feed, DFD HTML, MTC sitemap, Ladyironchef) is the active stopgap until those keys are unblocked. See PRD §6.4.
-- **Events catalog**: Bandsintown for concerts + Gemini-Flash museum agent for exhibitions (`lib/sources/museum-agent.ts`).
+- **Dining catalog** is meant to come from Google Places (with Foursquare fallback). **Both API providers are currently blocked** — Google Places returns 403 `API_KEY_HTTP_REFERRER_BLOCKED`, Foursquare returns 402 (out of credits). The blog scanner (Sethlui food-feed, DFD HTML, MTC sitemap, Ladyironchef, TSL Food) is the active stopgap until those keys are unblocked. See PRD §6.4.
+- **Events catalog**: Bandsintown for concerts + Gemini-Flash museum agent for exhibitions (`lib/sources/museum-agent.ts`) + blog scanner running TSL Things-to-Do RSS through an experience-aware Gemini prompt for pop-ups, indie shops, festivals, attractions, workshops, sport activities. Experience rows carry `cuisine_tags=['experience', ...]` which the planner's `isEvent()` (`lib/planner/category.ts`) reads as the dining-vs-event discriminator.
 - Onboarding auto-skipped on first visit (empty profile written). Profile persists to `localStorage['gabo:profile-v2']`.
 - **Planner-first home**: form is the hero, recs feed below as a tasting strip ("Right now in Singapore", capped to 3 cards × 3 sections).
 - Form: When (required) + two optional `PlaceSearchInput` fields (OneMap, pre-filled from `localStorage['gabo:last-starts-v1']`) + Special Occasion behind a disclosure.
