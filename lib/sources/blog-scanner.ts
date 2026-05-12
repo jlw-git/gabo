@@ -413,10 +413,35 @@ async function fetchArticleText(
 
 // ─── Gemini extraction ────────────────────────────────────────────────────────
 
+// Detects roundup-style article titles where the whole list is implicitly
+// new openings (used as the gate for the pubDate fallback below). Patterns:
+//   "16 New Cafes & Restaurants in May 2026"
+//   "10 New Restaurants Opening This March"
+//   "Just opened: 8 new spots in Tanjong Pagar"
+// Single-venue review titles like "Lucine by LUNA: A new Italian-Korean spot"
+// must NOT match — that was the Lucine bug.
+function isNewOpeningsRoundupTitle(title: string): boolean {
+  const t = title.toLowerCase()
+  // "N new ..." (count + "new" — strong signal of a numbered list)
+  if (/\b\d+\s+new\b/.test(t)) return true
+  // "new (cafes|restaurants|bars|spots|venues|eateries) ... (this|in) (month)"
+  if (
+    /\bnew\s+(cafes?|restaurants?|bars?|eateries?|spots?|places?|venues?|openings?)\b[^.]{0,80}\b(this|in)\s+(week|month|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/.test(
+      t
+    )
+  ) {
+    return true
+  }
+  // "just opened" / "newly opened" at the START — usually means a roundup.
+  if (/^(just|newly)\s+opened\b/.test(t)) return true
+  return false
+}
+
 async function extractVenues(
   blog: BlogConfig,
   title: string,
   url: string,
+  pubDate: Date,
   text: string,
   articlePhotoUrl: string | null,
   articleImageUrls: string[]
@@ -428,11 +453,15 @@ async function extractVenues(
       ? articleImageUrls.map((u, i) => `  ${i}: ${u}`).join('\n')
       : '  (no images available)'
 
+  const pubDateIso = pubDate.toISOString().slice(0, 10)
+  const isRoundup = isNewOpeningsRoundupTitle(title)
+
   const prompt = `You are extracting structured data from a Singapore food blog post.
 
 Blog: ${blog.name}
 Article title: ${title}
 Article URL: ${url}
+Article published: ${pubDateIso}
 
 Article text (truncated):
 ${text}
@@ -445,10 +474,10 @@ Return every Singapore restaurant, café, bar, or food venue clearly described i
 - address: the most specific Singapore address mentioned (street + district or postal code). Skip venues with no concrete address.
 - cuisine_tags: 1–3 tags from ONLY this list: ${CUISINE_TAGS.join(', ')}
 - vibe_tags: 0–2 tags from ONLY: cozy, adventurous, celebratory, low_key
-- opens_at: opening date as YYYY-MM-DD if the article explicitly states one (e.g. "opens 15 March 2026", "soft-launched last week", "just opened in May"). Use null if the article doesn't state an opening date — DO NOT guess from the article's publication date.
+- opens_at: opening date as YYYY-MM-DD if the article explicitly states one for THIS venue (e.g. "opens 15 March 2026", "soft-launched last week", "just opened in May"). Use null if no per-venue date is given.
 - ends_at: closing date as YYYY-MM-DD if the article says the venue or pop-up is time-limited and ends on a specific date (e.g. "pop-up runs until 30 June", "limited engagement through 15 May", "last day 12 Apr", "chef's residency ends 1 March"). Use null if the venue is permanent or no end date is given. DO NOT guess.
 - photo_url: the URL most clearly tied to this venue from the list above. MUST exactly match one of the URLs listed. Use null if none clearly applies.
-- is_new_opening: true ONLY if the article explicitly says the venue opened recently (within ~6 months) AND you can extract a concrete opens_at date. Set false for general reviews of established venues, "best of" round-ups, or anniversary write-ups. When uncertain, default to false.
+- is_new_opening: true if either (a) the article explicitly says THIS venue opened recently (within ~6 months), OR (b) the article title / framing presents the entire list as new openings (e.g. "16 New Cafes & Restaurants in May 2026", "10 New Restaurants Opening This March", "Just Opened: 8 new spots in Tanjong Pagar") and this venue is one of the featured entries. Set false for single-venue REVIEW articles of established venues, "best of" round-ups, anniversary write-ups, or articles that simply describe a venue as "a new place to try" without framing the whole list as new. When uncertain, default to false. (For roundups, opens_at can be null — the planner will fall back to the article's publish date.)
 - is_limited_run: true ONLY if the article frames the venue as time-limited (pop-up, residency, chef takeover, limited engagement, seasonal stall) AND you can extract a concrete ends_at date. Set false for permanent venues even if they have temporary menus or one-off events. When uncertain, default to false.
 - is_award_winner: true ONLY if THIS article is explicitly a write-up about a prestigious culinary award or list naming this venue — Michelin Guide Singapore (star or Bib Gourmand), Asia's 50 Best Restaurants, World's 50 Best Restaurants, World Gourmet Awards, World Gourmet Summit, or Tatler Dining. Set false for general reviews even if the venue is famous, and false for round-ups that don't mention an award by name. When uncertain, default to false.
 - award_name: short label for the award (e.g. "Michelin star 2026", "Michelin Bib Gourmand 2025", "Asia's 50 Best #12 2025", "World Gourmet Award 2026"). Use null when is_award_winner is false.
@@ -506,10 +535,21 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
           .slice(0, 2)
       : []
 
-    const opens_at =
+    const explicitOpensAt =
       typeof v.opens_at === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.opens_at) ? v.opens_at : null
     const ends_at =
       typeof v.ends_at === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.ends_at) ? v.ends_at : null
+
+    // Roundup pubDate fallback: when Gemini flags is_new_opening=true but
+    // didn't pin a per-venue opens_at, AND the article title is clearly a
+    // new-openings roundup (e.g. "16 New Cafes & Restaurants in May 2026"),
+    // use the article's publication date as opens_at. The article-title gate
+    // is what prevents the original Lucine bug — single-venue review articles
+    // whose titles don't match the roundup pattern stay on the strict
+    // "explicit per-venue date required" rule.
+    const is_new_opening = v.is_new_opening === true
+    const opens_at =
+      explicitOpensAt ?? (is_new_opening && isRoundup ? pubDateIso : null)
 
     // Photo: only accept Gemini's pick if it's actually in the article (defends
     // against URL hallucination). For single-venue posts, fall back to og:image.
@@ -540,7 +580,7 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
       opens_at,
       ends_at,
       photo_url,
-      is_new_opening: v.is_new_opening === true,
+      is_new_opening,
       is_limited_run: v.is_limited_run === true,
       is_award_winner,
       award_name,
@@ -888,6 +928,7 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
             blog,
             item.title,
             item.url,
+            item.pubDate,
             text,
             articlePhotoUrl,
             articleImageUrls
