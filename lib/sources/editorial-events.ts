@@ -45,6 +45,10 @@ export type EditorialEvent = {
 export const EDITORIAL_EVENTS: EditorialEvent[] = []
 
 const CLOSING_SOON_DAYS = 30
+// An exhibition / pop-up / residency feels "just opened" while it's still in
+// its first two weeks of the run. After that the novelty signal is stale —
+// regulars have already been, write-ups have already landed.
+const JUST_OPENED_DAYS = 14
 
 export function editorialEventToVenue(e: EditorialEvent): Omit<Venue, 'id'> & {
   source: 'editorial'
@@ -52,9 +56,28 @@ export function editorialEventToVenue(e: EditorialEvent): Omit<Venue, 'id'> & {
   source_url: string
   last_synced_at: string
 } {
+  const now = Date.now()
   const ends = new Date(e.ends_at)
-  const daysUntilEnd = Math.round((ends.getTime() - Date.now()) / 86_400_000)
+  const starts = new Date(e.starts_at)
+  const daysUntilEnd = Math.round((ends.getTime() - now) / 86_400_000)
+  const daysSinceStart = Math.round((now - starts.getTime()) / 86_400_000)
   const closingSoon = daysUntilEnd >= 0 && daysUntilEnd <= CLOSING_SOON_DAYS
+  const justOpened = daysSinceStart >= 0 && daysSinceStart <= JUST_OPENED_DAYS
+
+  // closing_soon outranks soft_launch for the primary badge (used for ring
+  // colour + freshness score). Both signals are persisted in badge_meta so
+  // PlanCard can render multi-label chips when an event is short-run.
+  let badge: 'closing_soon' | 'soft_launch' | 'none'
+  if (closingSoon) badge = 'closing_soon'
+  else if (justOpened) badge = 'soft_launch'
+  else badge = 'none'
+
+  // Always persist the run window so the planner can date-gate events (see
+  // filterCandidates in lib/planner/plan-date.ts). `opened` is set whenever
+  // the run started in the last JUST_OPENED_DAYS so the card can chip as
+  // "Just opened" even when the badge is closing_soon.
+  const baseMeta: Record<string, unknown> = { starts_at: e.starts_at, ends_at: e.ends_at }
+  if (justOpened) baseMeta.opened = e.starts_at
 
   return {
     name: e.name,
@@ -70,14 +93,8 @@ export function editorialEventToVenue(e: EditorialEvent): Omit<Venue, 'id'> & {
     chope_url: e.source_url, // event-side reservation = the source page itself
     hours_json: e.hours ?? null,
     ph_hours_json: null,
-    badge: closingSoon ? 'closing_soon' : 'none',
-    // Always persist the run window so the planner can date-gate events
-    // (see filterCandidates in lib/planner/plan-date.ts). The closing_soon
-    // reason is included only when the badge is set, to keep the UI copy
-    // honest.
-    badge_meta: closingSoon
-      ? { starts_at: e.starts_at, ends_at: e.ends_at, reason: 'official end date' }
-      : { starts_at: e.starts_at, ends_at: e.ends_at },
+    badge,
+    badge_meta: baseMeta,
     trending_score: 0,
     active: daysUntilEnd >= -1, // include events ending today
     source: 'editorial',

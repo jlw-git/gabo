@@ -7,25 +7,25 @@ type Props = {
 }
 
 const LABELS: Record<VenueSource, string> = {
-  google_places: 'via Google',
-  foursquare: 'via Foursquare',
-  bandsintown: 'via Bandsintown',
-  sistic: 'via Sistic',
-  museum: 'official venue page',
-  editorial: 'editor’s pick',
+  google_places: 'Google',
+  foursquare: 'Foursquare',
+  bandsintown: 'Bandsintown',
+  sistic: 'Sistic',
+  museum: 'Official venue page',
+  editorial: 'Editor’s pick',
   manual: '',
 }
 
 // Editorial rows come from a small known set of publications — show which one.
-// Falls back to the generic "editor's pick" if we don't recognise the host.
+// Falls back to the generic "Editor's pick" if we don't recognise the host.
 const EDITORIAL_HOSTS: Record<string, string> = {
-  'sethlui.com': 'via Seth Lui',
-  'danielfooddiary.com': 'via Daniel Food Diary',
-  'misstamchiak.com': 'via Miss Tam Chiak',
-  'ladyironchef.com': 'via Ladyironchef',
-  'eatbook.sg': 'via Eatbook',
-  'thesmartlocal.com': 'via The Smart Local',
-  'esplanade.com': 'via Esplanade',
+  'sethlui.com': 'Seth Lui',
+  'danielfooddiary.com': 'Daniel Food Diary',
+  'misstamchiak.com': 'Miss Tam Chiak',
+  'ladyironchef.com': 'Ladyironchef',
+  'eatbook.sg': 'Eatbook',
+  'thesmartlocal.com': 'The Smart Local',
+  'esplanade.com': 'Esplanade',
 }
 
 function editorialLabelForUrl(url: string | null | undefined): string | null {

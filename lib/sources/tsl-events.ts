@@ -364,6 +364,7 @@ export async function fetchTslEvents(): Promise<TslExtractedEvent[]> {
 // editorialEventToVenue but uses the article URL as source_url and the
 // article's ticket_url (if any) as the chope_url booking target.
 const CLOSING_SOON_DAYS = 30
+const JUST_OPENED_DAYS = 14
 
 export function tslEventToVenue(e: TslExtractedEvent): {
   name: string
@@ -379,8 +380,8 @@ export function tslEventToVenue(e: TslExtractedEvent): {
   chope_url: string
   hours_json: import('@/lib/planner/types').HoursJson | null
   ph_hours_json: null
-  badge: 'closing_soon' | 'none'
-  badge_meta: { starts_at: string; ends_at: string; reason?: string }
+  badge: 'closing_soon' | 'soft_launch' | 'none'
+  badge_meta: { starts_at: string; ends_at: string; reason?: string; opened?: string }
   trending_score: 0
   active: boolean
   source: 'editorial'
@@ -388,9 +389,27 @@ export function tslEventToVenue(e: TslExtractedEvent): {
   source_url: string
   last_synced_at: string
 } {
+  const now = Date.now()
   const ends = new Date(e.ends_at)
-  const daysUntilEnd = Math.round((ends.getTime() - Date.now()) / 86_400_000)
+  const starts = new Date(e.starts_at)
+  const daysUntilEnd = Math.round((ends.getTime() - now) / 86_400_000)
+  const daysSinceStart = Math.round((now - starts.getTime()) / 86_400_000)
   const closingSoon = daysUntilEnd >= 0 && daysUntilEnd <= CLOSING_SOON_DAYS
+  const justOpened = daysSinceStart >= 0 && daysSinceStart <= JUST_OPENED_DAYS
+
+  // closing_soon outranks soft_launch as the primary badge, but both signals
+  // are persisted in badge_meta so PlanCard can render multi-label chips on
+  // short-run pop-ups.
+  let badge: 'closing_soon' | 'soft_launch' | 'none'
+  if (closingSoon) badge = 'closing_soon'
+  else if (justOpened) badge = 'soft_launch'
+  else badge = 'none'
+
+  const badgeMeta: { starts_at: string; ends_at: string; reason?: string; opened?: string } = {
+    starts_at: e.starts_at,
+    ends_at: e.ends_at,
+  }
+  if (justOpened) badgeMeta.opened = e.starts_at
 
   return {
     name: e.name,
@@ -408,11 +427,8 @@ export function tslEventToVenue(e: TslExtractedEvent): {
     chope_url: e.ticket_url ?? e.source_url,
     hours_json: e.hours ?? null,
     ph_hours_json: null,
-    badge: closingSoon ? 'closing_soon' : 'none',
-    // Always persist the run window so the planner can date-gate events.
-    badge_meta: closingSoon
-      ? { starts_at: e.starts_at, ends_at: e.ends_at, reason: 'TSL article end date' }
-      : { starts_at: e.starts_at, ends_at: e.ends_at },
+    badge,
+    badge_meta: badgeMeta,
     trending_score: 0,
     active: daysUntilEnd >= -1,
     source: 'editorial',
