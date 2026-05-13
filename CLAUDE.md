@@ -15,7 +15,7 @@ Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + Supabase (Postgr
 - **Planner-first home**: form is the hero, recs feed below as a tasting strip ("Right now in Singapore", capped to 3 cards × 3 sections).
 - Form: When (required) + two optional `PlaceSearchInput` fields (OneMap, pre-filled from `localStorage['gabo:last-starts-v1']`) + Special Occasion behind a disclosure.
 - Weather auto-fetched server-side from NEA (`lib/weather.ts`); outdoor venues excluded on rain days.
-- Results: tabs (Dining / Events) + a **"What's new & trending" strip per tab** (3 cards max, soft_launch ∪ trending ≥ 0.7) above the filter chips + filter chips (All / Recommended / Limited / Just opened / ★ Shortlist) + List ↔ Map toggle. Empty states offer concrete actions.
+- Results: tabs (Dining / Events) + filter chips (All / Recommended / Limited / Just opened / ★ Shortlist) + List ↔ Map toggle. Empty states offer concrete actions.
 - Tap a card → `VenueDetailModal`: full hours, badge meta, profile-match highlights, OSM mini-map, cross-recs.
 - Cards use the shipped CTA pair: dark `stone-900` primary ("Reserve" / "Get tickets") + outlined "Directions" → Google Maps. Body copy uses real signal (`ends 15 May`, `opened 7 weeks ago`, etc) from `badge_meta`.
 - **Photo fallbacks**: 4 cuisine-typed SVGs in `public/img/fallback/` (`dining`/`bar`/`cafe`/`event`); `lib/photo-fallback.ts#photoUrlOrFallback` picks one when `photo_url` is null, with `onError` swap on `<img>` to also catch broken external URLs (Gemini-hallucinated, hotlink-blocked, 404).
@@ -41,7 +41,7 @@ Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + Supabase (Postgr
 - `app/api/cron/sync-museums/` — monthly museum-exhibition refresh (Gemini-grounded search)
 - `app/api/admin/reseed/` — one-shot full wipe + resync (gated by CRON_SECRET)
 - `app/api/recommendations/` — pre-search editorial recs feed
-- `components/` — `PlanDateForm`, `PlaceSearchInput`, `PlanCard`, `FairnessPill`, `RecommendationsFeed`, `ResultsView` (incl. "What's new & trending" strip), `VenueDetailModal`, `BookingOverlay`, `WhatsAppShareModal`, `OverviewMap`, `VenueMiniMap`
+- `components/` — `PlanDateForm`, `PlaceSearchInput`, `PlanCard`, `FairnessPill`, `RecommendationsFeed`, `ResultsView`, `VenueDetailModal`, `BookingOverlay`, `WhatsAppShareModal`, `OverviewMap`, `VenueMiniMap`
 - `lib/onemap/` — `client.ts` (auth, search, drive, pt routes), `cache.ts`
 - `lib/trending/` — `reddit.ts`, `refresh.ts`
 - `lib/sources/` — `google-places.ts`, `foursquare.ts` (new `places-api.foursquare.com` host), `dining-sync.ts`, `bandsintown.ts`, `editorial-events.ts`, `events-sync.ts`, `blog-scanner.ts` (per-blog `discover()`: RSS / HTML category / sitemap), `eatbook-rss.ts`, `museum-agent.ts`, `museum-scrapers.ts`
