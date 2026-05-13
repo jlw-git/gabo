@@ -23,6 +23,7 @@
 
 import * as cheerio from 'cheerio'
 import { GoogleGenAI } from '@google/genai'
+import { mapWithConcurrency } from '@/lib/async/pool'
 import { searchPlaces } from '@/lib/onemap/client'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 
@@ -115,8 +116,13 @@ const BLOGS: BlogConfig[] = [
 const LOOKBACK_DAYS = 90
 // Cap per-blog article count so a backlogged feed can't push the cron past
 // the 300s maxDuration. Each article is one Gemini call (~1–3s) plus
-// per-venue OneMap lookups.
-const MAX_ARTICLES_PER_BLOG = 25
+// per-venue OneMap lookups. With ARTICLE_CONCURRENCY=4 and 6 blogs, the run
+// fits comfortably inside Vercel's 300s function cap.
+const MAX_ARTICLES_PER_BLOG = 15
+// Articles processed in parallel inside each per-blog batch. Each article
+// triggers one Gemini call + 1–4 OneMap lookups; 4 in-flight balances Gemini
+// rate limits against the function-duration budget.
+const ARTICLE_CONCURRENCY = 4
 // Per-request — AbortSignal.timeout fires from creation time, so reusing a
 // module-level signal aborts every fetch once the module has been live longer
 // than the timeout.
@@ -196,6 +202,46 @@ export type BlogScanSummary = {
   upserted: number
   aged_out: number
   errors: string[]
+}
+
+// Both dining and experience rows share this shape; the differences are
+// entirely in the field VALUES (cuisine_tags carries the literal 'experience'
+// marker for events, is_outdoor can be true for outdoor experiences, hours
+// come from the experience defaults). One shape keeps the upsert path
+// uniform.
+type VenueRow = {
+  source: 'editorial'
+  source_id: string
+  source_url: string
+  name: string
+  lat: number
+  lng: number
+  address: string
+  cuisine_tags: string[]
+  vibe_tags: string[]
+  dietary_flags: []
+  budget_band: 2
+  is_outdoor: boolean
+  photo_url: string | null
+  chope_url: string | null
+  hours_json: ReturnType<typeof buildDefaultHoursJson>
+  ph_hours_json: null
+  // critic_pick is set in a second pass from cross-blog mention counts; the
+  // per-article extractor never emits it directly.
+  badge: 'closing_soon' | 'soft_launch' | 'award_fresh' | 'none'
+  badge_meta: {
+    opened?: string | null
+    ends_at?: string | null
+    starts_at?: string | null
+    award?: string | null
+    source?: string | null
+    reason?: string
+    hours_source: 'default'
+  }
+  trending_score: 0
+  active: true
+  accepts_reservations: boolean | null
+  last_synced_at: string
 }
 
 // A blog-discovered venue is "new" only for ~90 days — past that, the hype
@@ -846,51 +892,19 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
 
   // Both dining and experience rows share this shape; the differences are
   // entirely in the field VALUES (cuisine_tags carries the literal 'experience'
-  // marker for events, is_outdoor can be true for outdoor experiences, hours
-  // come from the experience defaults). One shape keeps the upsert path
-  // uniform.
-  type VenueRow = {
-    source: 'editorial'
-    source_id: string
-    source_url: string
-    name: string
-    lat: number
-    lng: number
-    address: string
-    cuisine_tags: string[]
-    vibe_tags: string[]
-    dietary_flags: []
-    budget_band: 2
-    is_outdoor: boolean
-    photo_url: string | null
-    chope_url: string | null
-    hours_json: ReturnType<typeof buildDefaultHoursJson>
-    ph_hours_json: null
-    // critic_pick is set in a second pass from cross-blog mention counts; the
-    // per-article extractor never emits it directly.
-    badge: 'closing_soon' | 'soft_launch' | 'award_fresh' | 'none'
-    badge_meta: {
-      opened?: string | null
-      ends_at?: string | null
-      starts_at?: string | null
-      award?: string | null
-      source?: string | null
-      reason?: string
-      hours_source: 'default'
-    }
-    trending_score: 0
-    active: true
-    accepts_reservations: boolean | null
-    last_synced_at: string
-  }
-
-  const toInsert: VenueRow[] = []
+  const supabase = createServiceRoleClient()
   const seenIds = new Set<string>() // dedup within this run
+  const allRows: VenueRow[] = []
 
+  // Per-blog processing: discover articles, parallel-extract, upsert this
+  // blog's rows immediately. The per-blog upsert is the critical change —
+  // before this refactor everything queued until the trailing upsert at the
+  // end, so any Vercel function timeout (or a single slow blog hanging the
+  // serial loop) lost the entire run's work. Now each blog flushes
+  // independently and partial progress survives.
   for (const blog of BLOGS) {
     summary.blogs_scanned++
     let items: RssItem[]
-
     try {
       items = await blog.discover()
     } catch (err) {
@@ -898,251 +912,280 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
       continue
     }
 
-    // Newest first, capped — feeds usually return reverse-chronological already.
     const capped = items
       .slice()
       .sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime())
       .slice(0, MAX_ARTICLES_PER_BLOG)
 
-    for (const item of capped) {
-      summary.articles_checked++
+    // Parallel article processing. Each article: HTML fetch + Gemini call +
+    // OneMap lookups. Concurrency 4 keeps Gemini RPM safe and OneMap polite
+    // while cutting wall time by ~4x vs. the serial baseline.
+    const perArticleRows = await mapWithConcurrency(
+      capped,
+      ARTICLE_CONCURRENCY,
+      (item) => processArticle(blog, item, summary, seenIds)
+    )
+    const blogRows = perArticleRows.flat()
 
-      let text: string
-      let articlePhotoUrl: string | null
-      let articleImageUrls: string[]
-
-      try {
-        ;({ text, photoUrl: articlePhotoUrl, imageUrls: articleImageUrls } =
-          await fetchArticleText(item.url))
-      } catch (err) {
-        summary.errors.push(
-          `${blog.name} "${item.title}": fetch failed — ${err instanceof Error ? err.message : String(err)}`
-        )
-        continue
-      }
-
-      if (blog.kind === 'dining') {
-        let venues: ExtractedVenue[]
-        try {
-          venues = await extractVenues(
-            blog,
-            item.title,
-            item.url,
-            item.pubDate,
-            text,
-            articlePhotoUrl,
-            articleImageUrls
-          )
-        } catch (err) {
-          summary.errors.push(
-            `${blog.name} "${item.title}": Gemini error — ${err instanceof Error ? err.message : String(err)}`
-          )
-          continue
-        }
-
-        if (venues.length === 0) continue
-        summary.articles_matched++
-
-        for (const venue of venues) {
-          summary.venues_extracted++
-
-          const location = await resolveAddress(venue.name, venue.address).catch(() => null)
-          if (!location) {
-            summary.errors.push(
-              `${blog.name} "${venue.name}": OneMap could not resolve "${venue.address}"`
-            )
-            continue
-          }
-          summary.addresses_validated++
-
-          const source_id = `${blog.prefix}-${slugify(venue.name)}`
-          if (seenIds.has(source_id)) continue
-          seenIds.add(source_id)
-
-          // is_new_opening / is_limited_run require BOTH the flag AND a parseable
-          // date — falling back to the article's pubDate produced misleading
-          // "opened 3 days ago" copy for established venues that happened to be
-          // reviewed recently (e.g. Lucine by LUNA showing as "opened 3 days ago"
-          // when it has been open for months).
-          const isLimited =
-            venue.is_limited_run && Boolean(venue.ends_at) && (venue.ends_at as string) >= new Date().toISOString().slice(0, 10)
-          const isNew = venue.is_new_opening && Boolean(venue.opens_at)
-          const isAward = venue.is_award_winner && Boolean(venue.award_name)
-
-          // Always carry every signal that applies in badge_meta so PlanCard can
-          // render multiple labels (a Michelin pop-up that opened last week
-          // should chip as Award-winning + Just opened + Limited run). The
-          // primary `badge` column picks one winner — used for ring colour and
-          // the freshness score weight in lib/planner/score.ts — but the meta
-          // is the source of truth for label rendering.
-          // Priority: closing_soon > soft_launch > award_fresh (critic_pick set
-          // in a second pass).
-          const badgeMeta: VenueRow['badge_meta'] = { hours_source: 'default' }
-          if (isLimited) badgeMeta.ends_at = venue.ends_at
-          if (isNew) badgeMeta.opened = venue.opens_at
-          if (isAward) badgeMeta.award = venue.award_name
-
-          let badge: VenueRow['badge']
-          if (isLimited) badge = 'closing_soon'
-          else if (isNew) badge = 'soft_launch'
-          else if (isAward) badge = 'award_fresh'
-          else badge = 'none'
-
-          toInsert.push({
-            source: 'editorial',
-            source_id,
-            source_url: item.url,
-            name: venue.name,
-            lat: location.lat,
-            lng: location.lng,
-            address: location.resolvedAddress,
-            cuisine_tags: venue.cuisine_tags,
-            vibe_tags: venue.vibe_tags,
-            dietary_flags: [],
-            budget_band: 2,
-            is_outdoor: false,
-            photo_url: venue.photo_url,
-            chope_url: null,
-            hours_json: buildDefaultHoursJson(venue.cuisine_tags),
-            ph_hours_json: null,
-            badge,
-            badge_meta: badgeMeta,
-            trending_score: 0,
-            active: true,
-            accepts_reservations: venue.accepts_reservations,
-            last_synced_at: new Date().toISOString(),
-          })
-        }
-      } else {
-        // Experience blog — same pipeline but with the experience extractor and
-        // event-shaped row (cuisine_tags carries the 'experience' marker so the
-        // planner's isEvent() treats the row as an event).
-        let experiences: ExtractedExperience[]
-        try {
-          experiences = await extractExperiences(
-            blog,
-            item.title,
-            item.url,
-            text,
-            articlePhotoUrl,
-            articleImageUrls
-          )
-        } catch (err) {
-          summary.errors.push(
-            `${blog.name} "${item.title}": Gemini error — ${err instanceof Error ? err.message : String(err)}`
-          )
-          continue
-        }
-
-        if (experiences.length === 0) continue
-        summary.articles_matched++
-
-        for (const exp of experiences) {
-          summary.venues_extracted++
-
-          const location = await resolveAddress(exp.name, exp.address).catch(() => null)
-          if (!location) {
-            summary.errors.push(
-              `${blog.name} "${exp.name}": OneMap could not resolve "${exp.address}"`
-            )
-            continue
-          }
-          summary.addresses_validated++
-
-          const source_id = `${blog.prefix}-${slugify(exp.name)}`
-          if (seenIds.has(source_id)) continue
-          seenIds.add(source_id)
-
-          // Date-gate context: editorial-events / tsl-events only badge
-          // closing_soon when the run ends within 30 days. Same convention
-          // here so a 6-month festival isn't flagged "Limited run" for half
-          // a year. starts_at + ends_at are always persisted in badge_meta
-          // when present though — that's what the planner's isInRunWindow
-          // reads to filter out events outside their run window.
-          const today = new Date().toISOString().slice(0, 10)
-          const isLimitedRun = exp.is_limited_run && Boolean(exp.ends_at) && (exp.ends_at as string) >= today
-          const isNewOpening = exp.is_new_opening && Boolean(exp.opens_at)
-          const daysUntilEnd =
-            exp.ends_at ? Math.round((new Date(exp.ends_at).getTime() - Date.now()) / 86_400_000) : Infinity
-          const closingSoon = isLimitedRun && daysUntilEnd <= 30
-
-          const badgeMeta: VenueRow['badge_meta'] = { hours_source: 'default' }
-          if (exp.starts_at) badgeMeta.starts_at = exp.starts_at
-          if (exp.ends_at) badgeMeta.ends_at = exp.ends_at
-          if (isNewOpening) badgeMeta.opened = exp.opens_at
-
-          let badge: VenueRow['badge']
-          if (closingSoon) badge = 'closing_soon'
-          else if (isNewOpening) badge = 'soft_launch'
-          else badge = 'none'
-
-          toInsert.push({
-            source: 'editorial',
-            source_id,
-            source_url: item.url,
-            name: exp.name,
-            lat: location.lat,
-            lng: location.lng,
-            address: location.resolvedAddress,
-            // 'experience' is the category marker the planner's isEvent()
-            // checks for — without it the row would be treated as dining.
-            cuisine_tags: ['experience', ...exp.experience_tags],
-            vibe_tags: exp.vibe_tags,
-            dietary_flags: [],
-            budget_band: 2,
-            is_outdoor: exp.is_outdoor,
-            photo_url: exp.photo_url,
-            // Mirrors editorialEventToVenue / tslEventToVenue: events use the
-            // source page as the "reservation" link, since clicking takes
-            // the user to ticketing / details.
-            chope_url: item.url,
-            hours_json: buildExperienceHoursJson(exp.experience_tags),
-            ph_hours_json: null,
-            badge,
-            badge_meta: badgeMeta,
-            trending_score: 0,
-            active: true,
-            // Workshops, markets, indie shops — booking conventions vary too
-            // widely to guess. Leave unknown and let the UI fall back to the
-            // chope_url heuristic in lib/reservations.ts.
-            accepts_reservations: null,
-            last_synced_at: new Date().toISOString(),
-          })
-        }
-      }
+    // Per-blog upsert. Even if a later blog blows up or the function gets
+    // killed past this point, every prior blog's rows are durably written.
+    if (blogRows.length > 0) {
+      await upsertChunks(supabase, blog.name, blogRows, summary)
     }
+    allRows.push(...blogRows)
   }
 
-  if (toInsert.length === 0) return summary
+  await applyCriticPickBadges(summary)
+  // already_in_catalog historically reported existing source_ids before
+  // upsert; with per-blog upsert that signal is less useful. Keep the field
+  // for backward compatibility, populated from the full run's row count.
+  summary.already_in_catalog = allRows.length
 
-  // Check which source_ids are already in the catalog.
-  const supabase = createServiceRoleClient()
-  const { data: existing } = await supabase
-    .from('venues')
-    .select('source_id')
-    .eq('source', 'editorial')
-    .in('source_id', toInsert.map((v) => v.source_id))
+  return summary
+}
 
-  const existingIds = new Set((existing ?? []).map((r: { source_id: string }) => r.source_id))
-  summary.already_in_catalog = existingIds.size
+// Per-article worker. Returns the rows extracted from this one article,
+// dispatching by blog.kind. Errors are pushed onto summary.errors and don't
+// throw, so one bad article never breaks the parallel batch.
+async function processArticle(
+  blog: BlogConfig,
+  item: RssItem,
+  summary: BlogScanSummary,
+  seenIds: Set<string>
+): Promise<VenueRow[]> {
+  summary.articles_checked++
 
-  // Upsert — keeps badge/score if the row already exists, updates address/tags otherwise.
+  let text: string
+  let articlePhotoUrl: string | null
+  let articleImageUrls: string[]
+  try {
+    ;({ text, photoUrl: articlePhotoUrl, imageUrls: articleImageUrls } =
+      await fetchArticleText(item.url))
+  } catch (err) {
+    summary.errors.push(
+      `${blog.name} "${item.title}": fetch failed — ${err instanceof Error ? err.message : String(err)}`
+    )
+    return []
+  }
+
+  if (blog.kind === 'dining') {
+    return processDiningArticle(blog, item, text, articlePhotoUrl, articleImageUrls, summary, seenIds)
+  }
+  return processExperienceArticle(blog, item, text, articlePhotoUrl, articleImageUrls, summary, seenIds)
+}
+
+async function processDiningArticle(
+  blog: BlogConfig,
+  item: RssItem,
+  text: string,
+  articlePhotoUrl: string | null,
+  articleImageUrls: string[],
+  summary: BlogScanSummary,
+  seenIds: Set<string>
+): Promise<VenueRow[]> {
+  let venues: ExtractedVenue[]
+  try {
+    venues = await extractVenues(
+      blog,
+      item.title,
+      item.url,
+      item.pubDate,
+      text,
+      articlePhotoUrl,
+      articleImageUrls
+    )
+  } catch (err) {
+    summary.errors.push(
+      `${blog.name} "${item.title}": Gemini error — ${err instanceof Error ? err.message : String(err)}`
+    )
+    return []
+  }
+
+  if (venues.length === 0) return []
+  summary.articles_matched++
+
+  const rows: VenueRow[] = []
+  for (const venue of venues) {
+    summary.venues_extracted++
+    const location = await resolveAddress(venue.name, venue.address).catch(() => null)
+    if (!location) {
+      summary.errors.push(
+        `${blog.name} "${venue.name}": OneMap could not resolve "${venue.address}"`
+      )
+      continue
+    }
+    summary.addresses_validated++
+
+    const source_id = `${blog.prefix}-${slugify(venue.name)}`
+    if (seenIds.has(source_id)) continue
+    seenIds.add(source_id)
+
+    const isLimited =
+      venue.is_limited_run && Boolean(venue.ends_at) && (venue.ends_at as string) >= new Date().toISOString().slice(0, 10)
+    const isNew = venue.is_new_opening && Boolean(venue.opens_at)
+    const isAward = venue.is_award_winner && Boolean(venue.award_name)
+
+    // Always carry every signal that applies in badge_meta so PlanCard can
+    // render multiple labels (a Michelin pop-up that opened last week
+    // should chip as Award-winning + Just opened + Limited run). The
+    // primary `badge` column picks one winner — used for ring colour and
+    // the freshness score weight in lib/planner/score.ts — but the meta
+    // is the source of truth for label rendering.
+    // Priority: closing_soon > soft_launch > award_fresh (critic_pick set
+    // in a second pass).
+    const badgeMeta: VenueRow['badge_meta'] = { hours_source: 'default' }
+    if (isLimited) badgeMeta.ends_at = venue.ends_at
+    if (isNew) badgeMeta.opened = venue.opens_at
+    if (isAward) badgeMeta.award = venue.award_name
+
+    let badge: VenueRow['badge']
+    if (isLimited) badge = 'closing_soon'
+    else if (isNew) badge = 'soft_launch'
+    else if (isAward) badge = 'award_fresh'
+    else badge = 'none'
+
+    rows.push({
+      source: 'editorial',
+      source_id,
+      source_url: item.url,
+      name: venue.name,
+      lat: location.lat,
+      lng: location.lng,
+      address: location.resolvedAddress,
+      cuisine_tags: venue.cuisine_tags,
+      vibe_tags: venue.vibe_tags,
+      dietary_flags: [],
+      budget_band: 2,
+      is_outdoor: false,
+      photo_url: venue.photo_url,
+      chope_url: null,
+      hours_json: buildDefaultHoursJson(venue.cuisine_tags),
+      ph_hours_json: null,
+      badge,
+      badge_meta: badgeMeta,
+      trending_score: 0,
+      active: true,
+      accepts_reservations: venue.accepts_reservations,
+      last_synced_at: new Date().toISOString(),
+    })
+  }
+  return rows
+}
+
+async function processExperienceArticle(
+  blog: BlogConfig,
+  item: RssItem,
+  text: string,
+  articlePhotoUrl: string | null,
+  articleImageUrls: string[],
+  summary: BlogScanSummary,
+  seenIds: Set<string>
+): Promise<VenueRow[]> {
+  let experiences: ExtractedExperience[]
+  try {
+    experiences = await extractExperiences(
+      blog,
+      item.title,
+      item.url,
+      text,
+      articlePhotoUrl,
+      articleImageUrls
+    )
+  } catch (err) {
+    summary.errors.push(
+      `${blog.name} "${item.title}": Gemini error — ${err instanceof Error ? err.message : String(err)}`
+    )
+    return []
+  }
+
+  if (experiences.length === 0) return []
+  summary.articles_matched++
+
+  const rows: VenueRow[] = []
+  for (const exp of experiences) {
+    summary.venues_extracted++
+    const location = await resolveAddress(exp.name, exp.address).catch(() => null)
+    if (!location) {
+      summary.errors.push(
+        `${blog.name} "${exp.name}": OneMap could not resolve "${exp.address}"`
+      )
+      continue
+    }
+    summary.addresses_validated++
+
+    const source_id = `${blog.prefix}-${slugify(exp.name)}`
+    if (seenIds.has(source_id)) continue
+    seenIds.add(source_id)
+
+    // Date-gate context: editorial-events / tsl-events only badge
+    // closing_soon when the run ends within 30 days. Same convention
+    // here so a 6-month festival isn't flagged "Limited run" for half
+    // a year. starts_at + ends_at are always persisted in badge_meta
+    // when present though — that's what the planner's isInRunWindow
+    // reads to filter out events outside their run window.
+    const today = new Date().toISOString().slice(0, 10)
+    const isLimitedRun = exp.is_limited_run && Boolean(exp.ends_at) && (exp.ends_at as string) >= today
+    const isNewOpening = exp.is_new_opening && Boolean(exp.opens_at)
+    const daysUntilEnd =
+      exp.ends_at ? Math.round((new Date(exp.ends_at).getTime() - Date.now()) / 86_400_000) : Infinity
+    const closingSoon = isLimitedRun && daysUntilEnd <= 30
+
+    const badgeMeta: VenueRow['badge_meta'] = { hours_source: 'default' }
+    if (exp.starts_at) badgeMeta.starts_at = exp.starts_at
+    if (exp.ends_at) badgeMeta.ends_at = exp.ends_at
+    if (isNewOpening) badgeMeta.opened = exp.opens_at
+
+    let badge: VenueRow['badge']
+    if (closingSoon) badge = 'closing_soon'
+    else if (isNewOpening) badge = 'soft_launch'
+    else badge = 'none'
+
+    rows.push({
+      source: 'editorial',
+      source_id,
+      source_url: item.url,
+      name: exp.name,
+      lat: location.lat,
+      lng: location.lng,
+      address: location.resolvedAddress,
+      cuisine_tags: ['experience', ...exp.experience_tags],
+      vibe_tags: exp.vibe_tags,
+      dietary_flags: [],
+      budget_band: 2,
+      is_outdoor: exp.is_outdoor,
+      photo_url: exp.photo_url,
+      chope_url: item.url,
+      hours_json: buildExperienceHoursJson(exp.experience_tags),
+      ph_hours_json: null,
+      badge,
+      badge_meta: badgeMeta,
+      trending_score: 0,
+      active: true,
+      accepts_reservations: null,
+      last_synced_at: new Date().toISOString(),
+    })
+  }
+  return rows
+}
+
+async function upsertChunks(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  blogName: string,
+  rows: VenueRow[],
+  summary: BlogScanSummary
+): Promise<void> {
   const chunkSize = 20
-  for (let i = 0; i < toInsert.length; i += chunkSize) {
-    const chunk = toInsert.slice(i, i + chunkSize)
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize)
     const { error, count } = await supabase
       .from('venues')
       .upsert(chunk, { onConflict: 'source,source_id', count: 'exact' })
     if (error) {
-      summary.errors.push(`upsert chunk ${i}: ${error.message}`)
+      summary.errors.push(`${blogName} upsert chunk ${i}: ${error.message}`)
     } else {
       summary.upserted += count ?? chunk.length
     }
   }
-
-  await applyCriticPickBadges(summary)
-
-  return summary
 }
 
 // ─── Cross-blog critic_pick ──────────────────────────────────────────────────
