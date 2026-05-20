@@ -50,7 +50,6 @@ Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + Supabase (Postgr
 - `lib/booking-url.ts` — chope_url → Google Search fallback
 - `lib/directions.ts` — Google Maps directions URL builder
 - `lib/map-style.ts` — OSM raster style
-- `lib/venues/catalog.ts` — legacy 53-venue seed; no longer used by the app, kept until prod has been resynced and verified
 - `lib/profile-storage.ts`, `lib/shortlist-storage.ts` — localStorage helpers
 - `public/img/fallback/{dining,bar,cafe,event}.svg` — generic card images
 - `supabase/migrations/` — `0001_gabo_schema.sql`, `0002_venues_public_read.sql`, `0003_shortlist_events.sql`, `0004_venue_sources.sql`, `0005_fix_source_unique_constraint.sql`, `0006_accepts_reservations.sql`
@@ -95,11 +94,12 @@ None of the data is fabricated, but the API-provider layer for dining is current
 Parked enhancements:
 - **Sistic scraping** for ~70% of paid SG events (TOS review pending).
 - Museum scrapers exist (`lib/sources/museum-scrapers.ts` + the agent in `museum-agent.ts`) — no longer parked.
-- The legacy `lib/venues/catalog.ts` file is no longer used by the app but kept until `/api/admin/reseed` has been run in prod and verified.
 
 Recently shipped:
 - **Cross-blog dedup** — planner output collapses by normalised name + ~200 m coordinate bucket (`bucketByCategory` in `lib/planner/score.ts`); the higher-scoring row wins and `badge_meta.source` unions across collapsed rows so the "Critic's pick" label still names every contributing blog.
 - **Gemini hours extraction** — `lib/sources/blog-scanner.ts` asks Gemini for parsed weekly hours from the article body. When present and validly shaped (HHMM strings per day, cross-midnight allowed), `hours_json` carries the extracted hours and `badge_meta.hours_source='extracted'`. Falls back to cuisine-typed defaults otherwise.
+- **`alcohol_free` extraction** — the blog-scanner Gemini call now returns a tri-state `alcohol_free` signal alongside `accepts_reservations`. When `true`, the row's `dietary_flags` carries `'alcohol_free'`, which makes the `no_alcohol` override actually filter (it was wired but hollow on the previous ship). Existing rows pick up the flag organically as the weekly cron re-extracts them; one cycle to full coverage.
+- **SG PH calendar expanded** — `lib/planner/sg-public-holidays.ts` now carries the full 2026 gazette (CNY, Hari Raya Puasa/Haji, Good Friday, Vesak Day, Deepavali + in-lieu Mondays) — sourced from mom.gov.sg. 2027 still fixed-date only until MOM publishes the full list.
 
 ## Secrets
 - `.env.local` (see `.env.example`): `ONEMAP_EMAIL`, `ONEMAP_PASSWORD`, `GOOGLE_PLACES_API_KEY`, `FOURSQUARE_API_KEY` (fallback), `GOOGLE_GEMINI_API_KEY` (blog scanner, museum agent, plan eval), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` + `NEXT_PUBLIC_*` mirrors. Optional: `CRON_SECRET` (gates `/api/cron/*` and `/api/admin/reseed`), `PREWARM_TOKEN`. Never commit. `GRABMAPS_API_KEY` and `BANDSINTOWN_APP_ID` are no longer used (GrabMaps retired post-hackathon; Bandsintown removed because its terms restrict API access to artists/representatives).
@@ -110,4 +110,4 @@ Partner-facing app, account sharing, push notifications, payment, rescheduling, 
 ## Known follow-ups
 - Restore the Google Places + Foursquare API access (user-side fixes per PRD §6.4) so the dining catalog scales beyond the blog-scanner stopgap.
 - Schema alignment: `profiles` table still has singular `vibe_default` + `budget_band`; code uses arrays. Migration needed if we persist to DB (currently localStorage only).
-- **SG public-holiday calendar** in `lib/planner/sg-public-holidays.ts` only carries fixed-date holidays (Jan 1 / May 1 / Aug 9 / Dec 25 for 2026–2027). Add the lunar / Islamic holidays (CNY, Vesak, Hari Raya Puasa/Haji, Deepavali) from mom.gov.sg each year — missing dates fall back to weekday hours, which is the safe failure mode but means PH-aware filtering misses those days.
+- **SG public-holiday calendar** in `lib/planner/sg-public-holidays.ts` covers 2026 in full (including lunar / Islamic dates and gazetted in-lieu Mondays); 2027 has fixed-date holidays only because MOM hasn't published 2027 yet. Re-pull from https://www.mom.gov.sg/employment-practices/public-holidays annually and append the new year's dates. Missing dates fall back to weekday hours (safe failure mode).
