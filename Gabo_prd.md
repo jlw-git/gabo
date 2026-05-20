@@ -97,14 +97,36 @@ The legacy 53-venue hand-seeded catalog has been retired. The catalog now grows 
 
 ---
 
+## 3.2 What's LLM-driven vs rules-based
+
+Gabo is **AI-driven** in three load-bearing places, all powered by **Gemini 2.5 Flash**. Everything else — the parts that need to be predictable, fast, and debuggable — is deterministic code.
+
+| Layer | Mechanism | Why |
+|---|---|---|
+| **Catalog ingestion (dining)** | Gemini extracts structured venue records from food-blog prose: name, address, cuisine/vibe tags, opening/closing dates, award labels, reservation policy, photo selection (`lib/sources/blog-scanner.ts#extractVenues`) | Natural-language understanding — articles vary wildly in shape (single review vs roundup vs award write-up) |
+| **Catalog ingestion (experiences)** | Same scanner, separate Gemini prompt extracts pop-ups, indie shops, festivals with run windows (`lib/sources/blog-scanner.ts#extractExperiences`) | Same |
+| **Hours extraction (blog-sourced venues)** | Gemini optionally returns parsed weekly hours from the article body; planner stamps `badge_meta.hours_source='extracted'` and falls back to cuisine-typed defaults otherwise | Articles state hours in free prose ("Tues–Sun, 6pm till late") that rules-based parsing handles poorly |
+| **Museum / exhibition discovery** | Gemini-grounded search agent finds current/upcoming exhibitions across NHB / ArtScience / Gardens (`lib/sources/museum-agent.ts`) | Open-ended discovery problem with no clean API |
+| **Per-venue reasoning copy** | Gemini generates the "why this fits you" line on each card from profile + venue signals (`lib/planner/gemini-eval.ts`) | NL generation tailored per user; would be brittle as a template engine |
+| Hard filters (open at time, dietary, weather, budget, run window) | Deterministic code in `lib/planner/plan-date.ts#filterCandidates` and `lib/planner/hours.ts` | Must be predictable; user can audit why a venue dropped out |
+| Fairness, match, freshness, friction scoring | Deterministic math in `lib/planner/score.ts` | Must be debuggable, fast, and stable across runs |
+| Card bucketing (Dining / Events) + filter-chip predicates | Pure functions on row metadata | Same |
+| Trending score (Reddit + shortlist velocity) | Statistical hybrid weight in `lib/trending/refresh.ts` | Statistical aggregation, not understanding |
+| Routing + ETAs | OneMap drive / public-transit APIs | Already correct; no LLM value-add |
+
+Rule of thumb: **LLM where the input is unstructured prose or the output is human-facing copy; rules where the input is structured data and the output is a user-visible decision.**
+
+---
+
 ## 4. Business Logic Rules
 
 ### 4.1 Candidate Filtering (hard filters)
 - Venue `active = true`.
-- Open at `scheduled_for` (cross-midnight aware; PH override TODO).
+- Open at `scheduled_for` (cross-midnight aware; on SG public holidays `ph_hours_json` is used when present, otherwise falls back to `hours_json`).
 - No `cuisines_avoided` overlap with `cuisine_tags`.
 - All `dietary_hardstops` satisfied by `dietary_flags`.
 - If override `vegetarian` → `vegetarian_friendly` required.
+- If override `no_alcohol` → `alcohol_free` required.
 - If weather is `rain` AND `is_outdoor` → exclude. Weather: NEA `/v1/environment/rainfall-forecast`.
 - Budget filter applies to **dining only** — experiences span budget_bands and aren't excluded by the user's restaurant budget preference.
 
@@ -162,7 +184,7 @@ The category split is determined by `isEvent(venue)` in `lib/planner/category.ts
 ### 4.5 Override Behavior
 - `Anniversary` / `Birthday`: boosts freshness weight, softens friction across all three scoring paths. Section reordering (Wild-first) from v1 is gone — there are no Wild/Stretch sections to reorder anymore.
 - `Vegetarian`: hard filter (requires `vegetarian_friendly`).
-- `No alcohol`: not wired (would need `alcohol_free` flag).
+- `No alcohol`: hard filter (requires `alcohol_free`).
 - Overrides are session-only.
 
 ### 4.6 Personalization Learning (post-MVP)
@@ -197,7 +219,7 @@ Tap **☆ → ★** on any card to shortlist (icon button overlaid on the photo,
 ---
 
 ## 5. Out of Scope (v1 / v2)
-Partner-facing app, account sharing, real-time scraping, true MRT/bus routing, push notifications, payment, rescheduling, magic-link auth, server-side personalization / feedback loop, PH hours override, `no_alcohol` wiring, PWA manifest.
+Partner-facing app, account sharing, real-time scraping, true MRT/bus routing, push notifications, payment, rescheduling, magic-link auth, server-side personalization / feedback loop, PWA manifest.
 
 **Schema divergence** to fix before enabling Supabase auth: `profiles.vibe_default` + `budget_band` are singular in the migration; code uses arrays.
 
@@ -244,14 +266,16 @@ Every row carries `source` ∈ {`google_places`, `foursquare`, `museum`, `editor
 6. **Cross-blog critic_pick pass** — after upsert, the scanner reloads the editorial catalog, groups rows by case-normalised name, counts distinct blog prefixes per group, and promotes rows with ≥3 distinct blogs to `badge='critic_pick'` (preserving `closing_soon` / `soft_launch` rows). `badge_meta.source` lists the contributing blogs. When a group's count drops below the threshold, rows are demoted to `award_fresh` (if award metadata is still present) or `none`.
 7. **Aging** — at the start of each run, time-sensitive badges are aged out: `soft_launch` after 90 days without a fresh mention, `award_fresh` after 365 days, `closing_soon` once `badge_meta.ends_at` is in the past.
 
-Cross-blog dedup is not implemented — the same venue mentioned by two blogs becomes two rows (different `source_id` prefixes). Acceptable for v1.
+Cross-blog dedup is not applied at the catalog level — keeping per-blog rows is what lets the post-upsert `critic_pick` pass count distinct blog mentions. Dedup happens **at planner output** (`bucketByCategory`): rows are grouped by normalised name + ~200 m coordinate bucket and only the highest-scoring row survives. `badge_meta.source` on that row already lists every contributing blog, so the user-facing "Critic's pick" label is unaffected.
 
 ### 6.3 Parked follow-ups
 - **Sistic scraping** — would cover ~70% of paid SG events. Held back pending TOS review.
 - **STB Tourism Information Hub** — closed to non-tourism-trade applicants (we can't register).
-- **Cross-blog dedup** in the blog scanner — Burnt Ends mentioned by Sethlui AND DFD becomes two rows.
-- **Gemini hours extraction** — replace the cuisine-aware defaults with hours actually mentioned in the article body.
 - **Generic photo fallback** is in place (`lib/photo-fallback.ts` + 4 SVGs in `public/img/fallback/`), so venues without a photo (and venues where the source URL fails to load) render a category-typed placeholder rather than a blank tile.
+
+**Recently shipped (was parked):**
+- **Cross-blog dedup** — planner-side dedup by normalised name + ~200 m coordinate bucket; the highest-scoring row wins. Multi-blog `badge_meta.source` is preserved so the "Critic's pick" label still names every contributing blog.
+- **Gemini hours extraction** — blog scanner now asks Gemini for parsed weekly hours from the article body. When present and validly shaped (`{ mon: [{open, close}], … }` with HHMM strings), `hours_json` carries the extracted hours and `badge_meta.hours_source = 'extracted'`. Falls back to cuisine-typed defaults (`hours_source: 'default'`) when the article doesn't state hours.
 
 ### 6.4 Current operational state (2026-05)
 The API-provider layer of §6 is currently degraded; the blog scanner is the sole active dining source until these are fixed:

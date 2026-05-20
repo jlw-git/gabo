@@ -1,6 +1,6 @@
 import { mapWithConcurrency } from '@/lib/async/pool'
 import { fetchDriveRoute, type DriveRouteResult } from '@/lib/onemap/client'
-import { isOpenAt } from '@/lib/planner/hours'
+import { isVenueOpenAt } from '@/lib/planner/hours'
 import type { PlanRequest } from '@/lib/planner/request-validation'
 import {
   bucketByCategory,
@@ -187,6 +187,9 @@ async function loadFromSupabase(profile: Profile, overrides: string[]): Promise<
   if (overrides.includes('vegetarian')) {
     query = query.contains('dietary_flags', ['vegetarian_friendly'])
   }
+  if (overrides.includes('no_alcohol')) {
+    query = query.contains('dietary_flags', ['alcohol_free'])
+  }
   const { data, error } = await query
   if (error) throw new Error(`supabase: ${error.message}`)
   return (data ?? []) as Venue[]
@@ -203,7 +206,7 @@ function filterCandidates(
   return filterInMemory(venues, profile, overrides).filter((venue) => {
     if (venue.cuisine_tags.some((c) => avoided.has(c))) return false
     if (weather.condition === 'rain' && venue.is_outdoor) return false
-    if (!isOpenAt(venue.hours_json, scheduledDate)) return false
+    if (!isVenueOpenAt(venue, scheduledDate)) return false
     if (!isInRunWindow(venue, scheduledDate)) return false
     return true
   })
@@ -260,6 +263,9 @@ function filterInMemory(all: Venue[], profile: Profile, overrides: string[]): Ve
     }
     if (!profile.dietary_hardstops.every((d) => venue.dietary_flags.includes(d))) return false
     if (overrides.includes('vegetarian') && !venue.dietary_flags.includes('vegetarian_friendly')) {
+      return false
+    }
+    if (overrides.includes('no_alcohol') && !venue.dietary_flags.includes('alcohol_free')) {
       return false
     }
     return true

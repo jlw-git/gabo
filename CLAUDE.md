@@ -94,10 +94,12 @@ None of the data is fabricated, but the API-provider layer for dining is current
 
 Parked enhancements:
 - **Sistic scraping** for ~70% of paid SG events (TOS review pending).
-- **Cross-blog dedup** in the blog scanner (Burnt Ends mentioned by Sethlui AND DFD currently becomes two rows).
-- **Gemini hours extraction** to replace the synthetic cuisine-aware default hours on blog-sourced venues.
 - Museum scrapers exist (`lib/sources/museum-scrapers.ts` + the agent in `museum-agent.ts`) — no longer parked.
 - The legacy `lib/venues/catalog.ts` file is no longer used by the app but kept until `/api/admin/reseed` has been run in prod and verified.
+
+Recently shipped:
+- **Cross-blog dedup** — planner output collapses by normalised name + ~200 m coordinate bucket (`bucketByCategory` in `lib/planner/score.ts`); the higher-scoring row wins and `badge_meta.source` unions across collapsed rows so the "Critic's pick" label still names every contributing blog.
+- **Gemini hours extraction** — `lib/sources/blog-scanner.ts` asks Gemini for parsed weekly hours from the article body. When present and validly shaped (HHMM strings per day, cross-midnight allowed), `hours_json` carries the extracted hours and `badge_meta.hours_source='extracted'`. Falls back to cuisine-typed defaults otherwise.
 
 ## Secrets
 - `.env.local` (see `.env.example`): `ONEMAP_EMAIL`, `ONEMAP_PASSWORD`, `GOOGLE_PLACES_API_KEY`, `FOURSQUARE_API_KEY` (fallback), `GOOGLE_GEMINI_API_KEY` (blog scanner, museum agent, plan eval), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` + `NEXT_PUBLIC_*` mirrors. Optional: `CRON_SECRET` (gates `/api/cron/*` and `/api/admin/reseed`), `PREWARM_TOKEN`. Never commit. `GRABMAPS_API_KEY` and `BANDSINTOWN_APP_ID` are no longer used (GrabMaps retired post-hackathon; Bandsintown removed because its terms restrict API access to artists/representatives).
@@ -108,6 +110,4 @@ Partner-facing app, account sharing, push notifications, payment, rescheduling, 
 ## Known follow-ups
 - Restore the Google Places + Foursquare API access (user-side fixes per PRD §6.4) so the dining catalog scales beyond the blog-scanner stopgap.
 - Schema alignment: `profiles` table still has singular `vibe_default` + `budget_band`; code uses arrays. Migration needed if we persist to DB (currently localStorage only).
-- `no_alcohol` override unwired (needs `alcohol_free` dietary flag).
-- PH (public holiday) hours override is TODO in `lib/planner/hours.ts`.
-- README.md is heavily out of date (still describes GrabMaps + 53-venue catalog + Easy yes / Worth the leap buckets).
+- **SG public-holiday calendar** in `lib/planner/sg-public-holidays.ts` only carries fixed-date holidays (Jan 1 / May 1 / Aug 9 / Dec 25 for 2026–2027). Add the lunar / Islamic holidays (CNY, Vesak, Hari Raya Puasa/Haji, Deepavali) from mom.gov.sg each year — missing dates fall back to weekday hours, which is the safe failure mode but means PH-aware filtering misses those days.

@@ -39,6 +39,7 @@ const DIETARY = [
   { value: 'no_beef', label: 'No beef' },
   { value: 'nut_allergy', label: 'Nut allergy' },
   { value: 'shellfish_allergy', label: 'Shellfish allergy' },
+  { value: 'alcohol_free', label: 'Alcohol-free' },
 ]
 
 const VIBES: { value: VibeTag; label: string; hint: string }[] = [

@@ -35,3 +35,15 @@ export function sgHourMinute(at: Date): { hour: number; minute: number } {
   const s = sgHHMM(at)
   return { hour: Number(s.slice(0, 2)), minute: Number(s.slice(2)) }
 }
+
+const dateFmt = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+// YYYY-MM-DD in SGT. Used to match against the public-holiday calendar.
+export function sgDateKey(at: Date): string {
+  return dateFmt.format(at)
+}
