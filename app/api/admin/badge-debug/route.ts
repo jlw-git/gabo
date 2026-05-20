@@ -23,8 +23,8 @@ async function handle(request: NextRequest) {
 
   const supabase = createServiceRoleClient()
   // Pull just the fields we need — keeps the payload small even on large
-  // catalogs. Limit to editorial / api-sourced dining rows; museum + bandsintown
-  // are events and don't go through the blog scanner.
+  // catalogs. Limit to editorial / api-sourced dining rows; museum is the
+  // event source and doesn't go through the blog scanner.
   const { data, error } = await supabase
     .from('venues')
     .select('id, name, source, source_id, badge, badge_meta, cuisine_tags, last_synced_at')

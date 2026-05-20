@@ -1,19 +1,17 @@
-// Events catalog sync. Combines five real sources:
-//   1. Bandsintown    — SG concerts (free API, real ticket links)
-//   2. Museum scrapers — SAM + NGS exhibitions (live HTML scraping)
-//   3. Esplanade      — in-house programming (sitemap + JSON-LD parse)
-//   4. The Smart Local — date-bounded events extracted via Gemini Flash
-//   5. Editorial      — hand-curated picks: ArtScience, Gardens, NHB
+// Events catalog sync. Combines four real sources:
+//   1. Museum scrapers — SAM + NGS exhibitions (live HTML scraping)
+//   2. Esplanade      — in-house programming (sitemap + JSON-LD parse)
+//   3. The Smart Local — date-bounded events extracted via Gemini Flash
+//   4. Editorial      — hand-curated picks: ArtScience, Gardens, NHB
+//
+// Bandsintown was removed: its Data Applications Terms restrict API access
+// to artists/representatives and forbid third-party aggregation, so a
+// consumer date planner can't use it without written approval.
 //
 // Each source is independently try/caught — one failure doesn't poison the rest.
 // Run via /api/cron/sync-events (daily) or manually.
 
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import {
-  BandsintownAuthError,
-  bandsintownEventToVenue,
-  fetchSingaporeConcerts,
-} from './bandsintown'
 import { EDITORIAL_EVENTS, editorialEventToVenue } from './editorial-events'
 import { fetchEsplanadeEvents } from './esplanade'
 import {
@@ -25,8 +23,6 @@ import { fetchTslEvents, tslEventToVenue } from './tsl-events'
 
 export type EventsSyncSummary = {
   refreshed_at: string
-  bandsintown_events: number
-  bandsintown_error: string | null
   sam_events: number
   sam_error: string | null
   ngs_events: number
@@ -43,8 +39,6 @@ export type EventsSyncSummary = {
 export async function syncEventsCatalog(): Promise<EventsSyncSummary> {
   const summary: EventsSyncSummary = {
     refreshed_at: new Date().toISOString(),
-    bandsintown_events: 0,
-    bandsintown_error: null,
     sam_events: 0,
     sam_error: null,
     ngs_events: 0,
@@ -59,28 +53,13 @@ export async function syncEventsCatalog(): Promise<EventsSyncSummary> {
   }
 
   type AnyRow =
-    | ReturnType<typeof bandsintownEventToVenue>
     | ReturnType<typeof editorialEventToVenue>
     | ReturnType<typeof museumEventToVenue>
     | ReturnType<typeof tslEventToVenue>
 
   const collected: AnyRow[] = []
 
-  // 1) Bandsintown concerts.
-  try {
-    const events = await fetchSingaporeConcerts()
-    summary.bandsintown_events = events.length
-    for (const e of events) collected.push(bandsintownEventToVenue(e))
-  } catch (err) {
-    summary.bandsintown_error =
-      err instanceof BandsintownAuthError
-        ? 'BANDSINTOWN_APP_ID not set'
-        : err instanceof Error
-          ? err.message
-          : 'unknown'
-  }
-
-  // 2) SAM exhibitions.
+  // 1) SAM exhibitions.
   try {
     const events = await fetchSamExhibitions()
     summary.sam_events = events.length
@@ -89,7 +68,7 @@ export async function syncEventsCatalog(): Promise<EventsSyncSummary> {
     summary.sam_error = err instanceof Error ? err.message : 'unknown'
   }
 
-  // 3) NGS exhibitions.
+  // 2) NGS exhibitions.
   try {
     const events = await fetchNgsExhibitions()
     summary.ngs_events = events.length
@@ -98,7 +77,7 @@ export async function syncEventsCatalog(): Promise<EventsSyncSummary> {
     summary.ngs_error = err instanceof Error ? err.message : 'unknown'
   }
 
-  // 4) Esplanade in-house programming.
+  // 3) Esplanade in-house programming.
   try {
     const events = await fetchEsplanadeEvents()
     summary.esplanade_events = events.length
@@ -107,7 +86,7 @@ export async function syncEventsCatalog(): Promise<EventsSyncSummary> {
     summary.esplanade_error = err instanceof Error ? err.message : 'unknown'
   }
 
-  // 5) The Smart Local — Gemini-extracted date-bounded events.
+  // 4) The Smart Local — Gemini-extracted date-bounded events.
   try {
     const events = await fetchTslEvents()
     summary.tsl_events = events.length
@@ -116,20 +95,20 @@ export async function syncEventsCatalog(): Promise<EventsSyncSummary> {
     summary.tsl_error = err instanceof Error ? err.message : 'unknown'
   }
 
-  // 6) Editorial events — always present, no API dependency.
+  // 5) Editorial events — always present, no API dependency.
   for (const e of EDITORIAL_EVENTS) {
     collected.push(editorialEventToVenue(e))
     summary.editorial_events += 1
   }
 
-  // 7) Dedup by source:source_id. Editorial wins ties (appended last).
+  // 6) Dedup by source:source_id. Editorial wins ties (appended last).
   const byKey = new Map<string, AnyRow>()
   for (const row of collected) {
     byKey.set(`${row.source}:${row.source_id}`, row)
   }
   const deduped = [...byKey.values()]
 
-  // 8) Upsert to Supabase. Service role bypasses RLS — sync routes are
+  // 7) Upsert to Supabase. Service role bypasses RLS — sync routes are
   // already protected by CRON_SECRET.
   const supabase = createServiceRoleClient()
   const chunkSize = 50

@@ -13,7 +13,7 @@ import type { Venue } from './types'
 
 // Time windows match the original chip-rendering thresholds. closing_soon's
 // 30-day window is the same value the source extractors (blog-scanner,
-// editorial-events, tsl-events, bandsintown) used when they originally set
+// editorial-events, tsl-events) use when they originally set
 // the badge — so a row written before this refactor with badge='closing_soon'
 // and ends_at = today+25d still passes hasClosingSoonLabel.
 export const CLOSING_SOON_WINDOW_DAYS = 30
