@@ -9,7 +9,6 @@ export type Badge = 'closing_soon' | 'soft_launch' | 'critic_pick' | 'award_fres
 export type VenueSource =
   | 'google_places'
   | 'foursquare'
-  | 'bandsintown'
   | 'sistic'
   | 'museum'
   | 'editorial'

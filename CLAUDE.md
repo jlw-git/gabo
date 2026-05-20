@@ -10,7 +10,7 @@ Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + Supabase (Postgr
 ## Current build state
 - Supabase live. Per-row `source`/`source_url` columns drive UI attribution. Hand-seeded `source='manual'` rows wiped via `/api/admin/reseed`.
 - **Dining catalog** is meant to come from Google Places (with Foursquare fallback). **Both API providers are currently blocked** — Google Places returns 403 `API_KEY_HTTP_REFERRER_BLOCKED`, Foursquare returns 402 (out of credits). The blog scanner (Sethlui food-feed, DFD HTML, MTC sitemap, Ladyironchef, TSL Food) is the active stopgap until those keys are unblocked. See PRD §6.4.
-- **Events catalog**: Bandsintown for concerts + Gemini-Flash museum agent for exhibitions (`lib/sources/museum-agent.ts`) + blog scanner running TSL Things-to-Do RSS through an experience-aware Gemini prompt for pop-ups, indie shops, festivals, attractions, workshops, sport activities. Experience rows carry `cuisine_tags=['experience', ...]` which the planner's `isEvent()` (`lib/planner/category.ts`) reads as the dining-vs-event discriminator.
+- **Events catalog**: Gemini-Flash museum agent for exhibitions (`lib/sources/museum-agent.ts`) + blog scanner running TSL Things-to-Do RSS through an experience-aware Gemini prompt for pop-ups, indie shops, festivals, attractions, workshops, sport activities. Experience rows carry `cuisine_tags=['experience', ...]` which the planner's `isEvent()` (`lib/planner/category.ts`) reads as the dining-vs-event discriminator. (Bandsintown was removed as a concert source — its Data Applications Terms restrict API access to artists/representatives and forbid third-party aggregation with other data, so a consumer date planner can't use it without written approval. No replacement concert source yet.)
 - Onboarding auto-skipped on first visit (empty profile written). Profile persists to `localStorage['gabo:profile-v2']`.
 - **Planner-first home**: form is the hero, recs feed below as a tasting strip ("Right now in Singapore", capped to 3 cards × 3 sections).
 - Form: When (required) + two optional `PlaceSearchInput` fields (OneMap, pre-filled from `localStorage['gabo:last-starts-v1']`) + Special Occasion behind a disclosure.
@@ -35,7 +35,7 @@ Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + Supabase (Postgr
 - `app/api/shortlist-event/` — anonymous logger feeding internal trending velocity
 - `app/api/cron/trending/` — weekly trending refresh (`refreshTrendingScores`)
 - `app/api/cron/sync-dining/` — weekly dining catalog refresh (Google Places → Foursquare)
-- `app/api/cron/sync-events/` — daily events catalog refresh (Bandsintown + editorial)
+- `app/api/cron/sync-events/` — daily events catalog refresh (editorial only; Bandsintown removed)
 - `app/api/cron/sync-blogs/` — weekly editorial-blog scanner (Tue 09:00 UTC)
 - `app/api/cron/sync-eatbook/` — weekly Eatbook roundup-style sync
 - `app/api/cron/sync-museums/` — monthly museum-exhibition refresh (Gemini-grounded search)
@@ -44,7 +44,7 @@ Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + Supabase (Postgr
 - `components/` — `PlanDateForm`, `PlaceSearchInput`, `PlanCard`, `FairnessPill`, `RecommendationsFeed`, `ResultsView`, `VenueDetailModal`, `BookingOverlay`, `WhatsAppShareModal`, `OverviewMap`, `VenueMiniMap`
 - `lib/onemap/` — `client.ts` (auth, search, drive, pt routes), `cache.ts`
 - `lib/trending/` — `reddit.ts`, `refresh.ts`
-- `lib/sources/` — `google-places.ts`, `foursquare.ts` (new `places-api.foursquare.com` host), `dining-sync.ts`, `bandsintown.ts`, `editorial-events.ts`, `events-sync.ts`, `blog-scanner.ts` (per-blog `discover()`: RSS / HTML category / sitemap), `eatbook-rss.ts`, `museum-agent.ts`, `museum-scrapers.ts`
+- `lib/sources/` — `google-places.ts`, `foursquare.ts` (new `places-api.foursquare.com` host), `dining-sync.ts`, `editorial-events.ts`, `events-sync.ts`, `blog-scanner.ts` (per-blog `discover()`: RSS / HTML category / sitemap), `eatbook-rss.ts`, `museum-agent.ts`, `museum-scrapers.ts`
 - `lib/planner/` — `types.ts`, `hours.ts` (cross-midnight aware), `score.ts`, `plan-date.ts` (incl. `applyShortlistAffinity`), `gemini-eval.ts` (per-venue reasoning copy)
 - `lib/photo-fallback.ts` — `photoUrlOrFallback(card)` selects one of 4 SVG placeholders
 - `lib/booking-url.ts` — chope_url → Google Search fallback
@@ -100,7 +100,7 @@ Parked enhancements:
 - The legacy `lib/venues/catalog.ts` file is no longer used by the app but kept until `/api/admin/reseed` has been run in prod and verified.
 
 ## Secrets
-- `.env.local` (see `.env.example`): `ONEMAP_EMAIL`, `ONEMAP_PASSWORD`, `GOOGLE_PLACES_API_KEY`, `FOURSQUARE_API_KEY` (fallback), `GOOGLE_GEMINI_API_KEY` (blog scanner, museum agent, plan eval), `BANDSINTOWN_APP_ID`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` + `NEXT_PUBLIC_*` mirrors. Optional: `CRON_SECRET` (gates `/api/cron/*` and `/api/admin/reseed`), `PREWARM_TOKEN`. Never commit. The old `GRABMAPS_API_KEY` is no longer used.
+- `.env.local` (see `.env.example`): `ONEMAP_EMAIL`, `ONEMAP_PASSWORD`, `GOOGLE_PLACES_API_KEY`, `FOURSQUARE_API_KEY` (fallback), `GOOGLE_GEMINI_API_KEY` (blog scanner, museum agent, plan eval), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` + `NEXT_PUBLIC_*` mirrors. Optional: `CRON_SECRET` (gates `/api/cron/*` and `/api/admin/reseed`), `PREWARM_TOKEN`. Never commit. `GRABMAPS_API_KEY` and `BANDSINTOWN_APP_ID` are no longer used (GrabMaps retired post-hackathon; Bandsintown removed because its terms restrict API access to artists/representatives).
 
 ## Out of scope for v1
 Partner-facing app, account sharing, push notifications, payment, rescheduling, magic-link auth (deferred — localStorage profile works for demo).
