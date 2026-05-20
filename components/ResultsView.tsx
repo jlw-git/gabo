@@ -118,9 +118,25 @@ export function ResultsView({
 
   const tabCards = tab === 'dining' ? buckets.dining : buckets.events
   const activeCards = useMemo(() => applyFilter(tabCards, filter, shortlist), [tabCards, filter, shortlist])
-  const shortlistCount = useMemo(
-    () => allCards.filter((c) => shortlist.has(c.id)).length,
-    [allCards, shortlist]
+  // Tab badges count only the cards that 'All' would surface — keeps the tab
+  // pill count in sync with the chip below it, instead of showing a higher
+  // raw-bucket number that no chip will ever match.
+  const tabCounts = useMemo<Record<Tab, number>>(
+    () => ({
+      dining: applyFilter(buckets.dining, 'all', shortlist).length,
+      events: applyFilter(buckets.events, 'all', shortlist).length,
+    }),
+    [buckets.dining, buckets.events, shortlist]
+  )
+  const filterCounts = useMemo<Record<Filter, number>>(
+    () => ({
+      all: applyFilter(tabCards, 'all', shortlist).length,
+      recommended: tabCards.filter(isRecommended).length,
+      limited: tabCards.filter(hasClosingSoonLabel).length,
+      new: tabCards.filter(hasJustOpenedLabel).length,
+      shortlist: tabCards.filter((c) => shortlist.has(c.id)).length,
+    }),
+    [tabCards, shortlist]
   )
   const showEtaToggle = useMemo(
     () => allCards.some((c) => c.eta_a_min > 0 || c.eta_b_min > 0),
@@ -169,7 +185,7 @@ export function ResultsView({
               <CategoryTabs
                 active={tab}
                 onChange={setTab}
-                counts={{ dining: buckets.dining.length, events: buckets.events.length }}
+                counts={tabCounts}
               />
               {showEtaToggle && <EtaModeToggle mode={mode} onChange={setMode} />}
             </div>
@@ -189,7 +205,7 @@ export function ResultsView({
             <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {FILTERS.map((f) => {
                 const on = f.key === filter
-                const showCount = f.key === 'shortlist' && shortlistCount > 0
+                const count = filterCounts[f.key]
                 return (
                   <button
                     key={f.key}
@@ -202,11 +218,9 @@ export function ResultsView({
                     }`}
                   >
                     {f.label}
-                    {showCount && (
-                      <span className={`ml-1.5 rounded-full px-1.5 text-[10px] ${on ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-700'}`}>
-                        {shortlistCount}
-                      </span>
-                    )}
+                    <span className={`ml-1.5 rounded-full px-1.5 text-[10px] ${on ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-700'}`}>
+                      {count}
+                    </span>
                   </button>
                 )
               })}
