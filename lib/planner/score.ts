@@ -125,19 +125,83 @@ const MAX_ETA_MIN = 60
 // Split routed candidates into Dining and Events tabs, sorted by score.
 // When ETAs are populated, drop venues over 60 min from either start; with
 // no ETAs, that filter is a no-op and everything passes through.
+//
+// Cross-source dedup: editorial blog rows are persisted per-blog (one row
+// per blog × venue), which is what lets the post-upsert `critic_pick` pass
+// count distinct blog mentions. At planner output we collapse them so the
+// user sees a single card per real-world venue. Dedup key is
+// normalised-name + ~200 m coordinate bucket; the higher-scoring row wins
+// and the loser's `badge_meta.source` is merged in so the "Critic's pick"
+// label still names every contributing blog.
 export function bucketByCategory(ranked: RankedVenue[]): Buckets {
   const reachable = ranked.filter((r) => {
     const maxEta = Math.max(r.eta_a_min, r.eta_b_min)
     return maxEta === 0 || maxEta <= MAX_ETA_MIN
   })
 
+  const deduped = dedupeByVenue(reachable)
+
   const dining: PlanCard[] = []
   const events: PlanCard[] = []
-  for (const r of [...reachable].sort((a, b) => b.score - a.score)) {
+  for (const r of [...deduped].sort((a, b) => b.score - a.score)) {
     const category: Category = isEvent(r) ? 'event' : 'dining'
     const list = category === 'event' ? events : dining
     if (list.length >= PER_CATEGORY_CAP) continue
     list.push({ ...r, bucket: category })
   }
   return { dining, events }
+}
+
+const COORD_BUCKET_DEG = 0.002 // ~220 m at SG latitude
+
+function venueDedupeKey(v: RankedVenue): string {
+  const name = v.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+  const lat = Math.round(v.lat / COORD_BUCKET_DEG)
+  const lng = Math.round(v.lng / COORD_BUCKET_DEG)
+  return `${name}|${lat},${lng}`
+}
+
+function dedupeByVenue(ranked: RankedVenue[]): RankedVenue[] {
+  // Sort highest-score first so the winner is the first entry seen per key.
+  const byScoreDesc = [...ranked].sort((a, b) => b.score - a.score)
+  const winners = new Map<string, RankedVenue>()
+  for (const r of byScoreDesc) {
+    const key = venueDedupeKey(r)
+    const existing = winners.get(key)
+    if (!existing) {
+      winners.set(key, r)
+      continue
+    }
+    const mergedSource = mergeBlogSources(existing.badge_meta, r.badge_meta)
+    if (mergedSource && mergedSource !== (existing.badge_meta as { source?: string } | null)?.source) {
+      winners.set(key, {
+        ...existing,
+        badge_meta: { ...(existing.badge_meta ?? {}), source: mergedSource },
+      })
+    }
+  }
+  return [...winners.values()]
+}
+
+// `badge_meta.source` on editorial rows is "Sethlui, DFD" — comma-separated
+// blog names from the post-upsert critic_pick pass. When two rows collapse
+// into one card, union those name sets so the surviving card credits every
+// blog that mentioned the venue.
+function mergeBlogSources(
+  a: Record<string, unknown> | null,
+  b: Record<string, unknown> | null
+): string | null {
+  const sA = typeof a?.source === 'string' ? a.source : ''
+  const sB = typeof b?.source === 'string' ? b.source : ''
+  if (!sA && !sB) return null
+  const names = new Set<string>()
+  for (const s of [sA, sB]) {
+    for (const n of s.split(',').map((x) => x.trim()).filter(Boolean)) {
+      names.add(n)
+    }
+  }
+  return [...names].sort().join(', ') || null
 }

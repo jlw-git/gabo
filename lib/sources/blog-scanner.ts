@@ -154,6 +154,9 @@ const EXPERIENCE_TAGS = [
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type HoursWindow = { open: string; close: string }
+type ExtractedHoursJson = Partial<Record<typeof ALL_DAYS[number], HoursWindow[]>>
+
 type ExtractedVenue = {
   name: string
   address: string
@@ -169,6 +172,9 @@ type ExtractedVenue = {
   // Tri-state: true / false / null (unknown). Lets the planner trust this
   // when the article is explicit and fall back to the regex when not.
   accepts_reservations: boolean | null
+  // Weekly hours pulled from the article body. Null when the article doesn't
+  // state hours; the row then falls back to cuisine-typed defaults.
+  hours: ExtractedHoursJson | null
 }
 
 type ExtractedExperience = {
@@ -236,7 +242,7 @@ type VenueRow = {
     award?: string | null
     source?: string | null
     reason?: string
-    hours_source: 'default'
+    hours_source: 'default' | 'extracted'
   }
   trending_score: 0
   active: true
@@ -531,12 +537,13 @@ Return every Singapore restaurant, café, bar, or food venue clearly described i
     - true: the article mentions reservations, bookings, a reservation phone line, Chope/SevenRooms/OpenTable, "book a table", "reservations recommended", or describes the venue as a sit-down restaurant where bookings are clearly typical.
     - false: the article explicitly says the venue is walk-in only, "no reservations", "first-come first-served", "queue", or describes it as a hawker stall, food-court tenant, kopitiam, coffee shop, or a small zi char / sliced-fish / bak kut teh / chicken-rice / laksa / prata-style stall where reservations are not taken.
     - null: the article doesn't say either way and the venue type isn't clearly one or the other. Prefer null over guessing.
+- hours: weekly opening hours if the article states them in any parseable form (e.g. "Tues–Sun, 6pm–late", "Daily, 11.30am–10pm", "Closed Mondays"). Return an object keyed by day codes mon/tue/wed/thu/fri/sat/sun, with each value an ARRAY of {open, close} windows. Times MUST be 4-digit HHMM strings in 24-hour SGT (e.g. "1130", "2200", "0030" for past midnight). Days the venue is closed should be an empty array. Two windows are allowed for split service (lunch + dinner). Return null if the article doesn't mention hours, or if you can't confidently parse them. DO NOT guess.
 
 Skip venues outside Singapore. Skip venues mentioned only in passing without enough detail to plan a visit.
 
 Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
 [
-  { "name": "...", "address": "...", "cuisine_tags": [...], "vibe_tags": [...], "opens_at": null, "ends_at": null, "photo_url": null, "is_new_opening": false, "is_limited_run": false, "is_award_winner": false, "award_name": null, "accepts_reservations": null }
+  { "name": "...", "address": "...", "cuisine_tags": [...], "vibe_tags": [...], "opens_at": null, "ends_at": null, "photo_url": null, "is_new_opening": false, "is_limited_run": false, "is_award_winner": false, "award_name": null, "accepts_reservations": null, "hours": null }
 ]`
 
   const result = await ai.models.generateContent({
@@ -631,9 +638,41 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
       is_award_winner,
       award_name,
       accepts_reservations,
+      hours: parseExtractedHours(v.hours),
     })
   }
   return out
+}
+
+// Tolerant validator for the optional `hours` field. Gemini occasionally
+// returns near-misses (lowercase "Mon", colon-separated times, single
+// window-object instead of array). Anything that doesn't shape up cleanly
+// returns null — the row then falls back to cuisine-typed defaults.
+function parseExtractedHours(raw: unknown): ExtractedHoursJson | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const src = raw as Record<string, unknown>
+  const out: ExtractedHoursJson = {}
+  let anyWindow = false
+  for (const day of ALL_DAYS) {
+    const cell = src[day]
+    if (cell === undefined || cell === null) continue
+    const list = Array.isArray(cell) ? cell : [cell]
+    const windows: HoursWindow[] = []
+    for (const entry of list) {
+      if (!entry || typeof entry !== 'object') continue
+      const w = entry as Record<string, unknown>
+      const open = typeof w.open === 'string' ? w.open : null
+      const close = typeof w.close === 'string' ? w.close : null
+      if (!open || !close) continue
+      if (!/^\d{4}$/.test(open) || !/^\d{4}$/.test(close)) continue
+      // Reject zero-length windows; cross-midnight (close < open) is allowed.
+      if (open === close) continue
+      windows.push({ open, close })
+      anyWindow = true
+    }
+    out[day] = windows
+  }
+  return anyWindow ? out : null
 }
 
 // Experience extractor — runs on blogs with kind='experience'. Lifestyle
@@ -1033,7 +1072,10 @@ async function processDiningArticle(
     // is the source of truth for label rendering.
     // Priority: closing_soon > soft_launch > award_fresh (critic_pick set
     // in a second pass).
-    const badgeMeta: VenueRow['badge_meta'] = { hours_source: 'default' }
+    const hoursJson = venue.hours ?? buildDefaultHoursJson(venue.cuisine_tags)
+    const badgeMeta: VenueRow['badge_meta'] = {
+      hours_source: venue.hours ? 'extracted' : 'default',
+    }
     if (isLimited) badgeMeta.ends_at = venue.ends_at
     if (isNew) badgeMeta.opened = venue.opens_at
     if (isAward) badgeMeta.award = venue.award_name
@@ -1059,7 +1101,7 @@ async function processDiningArticle(
       is_outdoor: false,
       photo_url: venue.photo_url,
       chope_url: null,
-      hours_json: buildDefaultHoursJson(venue.cuisine_tags),
+      hours_json: hoursJson,
       ph_hours_json: null,
       badge,
       badge_meta: badgeMeta,
