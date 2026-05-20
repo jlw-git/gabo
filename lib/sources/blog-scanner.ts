@@ -108,7 +108,7 @@ const BLOGS: BlogConfig[] = [
     kind: 'experience',
     // Covers SG events, pop-ups, indie shops, attractions, fairs, workshops,
     // and night-time activities — the layer that fills the events catalog
-    // beyond museum exhibitions and Bandsintown concerts.
+    // beyond museum exhibitions.
     discover: () => fetchFeedItems('https://thesmartlocal.com/category/things-to-do/feed/'),
   },
 ]

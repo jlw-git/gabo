@@ -210,8 +210,8 @@ function filterCandidates(
 }
 
 // Event rows record their run window in badge_meta.starts_at / ends_at
-// (see bandsintownEventToVenue, museumEventToVenue, editorialEventToVenue,
-// tslEventToVenue). When both are present, the planner rejects any
+// (see museumEventToVenue, editorialEventToVenue, tslEventToVenue).
+// When both are present, the planner rejects any
 // scheduledDate that falls outside [starts_at, ends_at]. Date-only fields
 // — interpret as inclusive day boundaries so a 14 May search still matches
 // an event whose ends_at is 2026-05-14.

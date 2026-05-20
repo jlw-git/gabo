@@ -9,7 +9,6 @@ type Props = {
 const LABELS: Record<VenueSource, string> = {
   google_places: 'Google',
   foursquare: 'Foursquare',
-  bandsintown: 'Bandsintown',
   sistic: 'Sistic',
   museum: 'Official venue page',
   editorial: 'Editor’s pick',

@@ -7,7 +7,7 @@ import { refreshTrendingScores } from '@/lib/trending/refresh'
 // One-shot full catalog rebuild from real sources:
 //   1. Delete ALL rows from the venues table
 //   2. Run the dining sync (Google Places → Foursquare fallback)
-//   3. Run the events sync (Bandsintown + museum scrapers + editorial)
+//   3. Run the events sync (museum scrapers + Esplanade + TSL + editorial)
 //   4. Refresh trending scores (Reddit + shortlist velocity)
 //
 // Gate behind CRON_SECRET (if set). Safe to call from localhost without token

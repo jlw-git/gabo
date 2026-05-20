@@ -36,7 +36,7 @@ export type EditorialEvent = {
 
 // ArtScience Museum, NHB, and Gardens by the Bay exhibitions are now
 // discovered automatically by the museum agent (lib/sources/museum-agent.ts).
-// Esplanade is a permanent venue covered by Bandsintown for specific shows.
+// Esplanade's own programming comes from lib/sources/esplanade.ts.
 //
 // This array is intentionally empty. Add entries here only for venues that:
 //   - have no live scraper and no API feed

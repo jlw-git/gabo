@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server'
 import { syncEventsCatalog } from '@/lib/sources/events-sync'
 
-// Refreshes the events catalog from Bandsintown (concerts) + SAM/NGS scrapers
-// + editorial (ArtScience, NHB, Gardens, Esplanade). Daily cron.
+// Refreshes the events catalog from SAM/NGS scrapers + Esplanade + TSL
+// + editorial (ArtScience, NHB, Gardens). Daily cron.
 // Run manually: curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/sync-events
 //
 // maxDuration bumped to 300s: NGS scraper fetches up to 20 detail pages in
