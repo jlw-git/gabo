@@ -172,6 +172,11 @@ type ExtractedVenue = {
   // Tri-state: true / false / null (unknown). Lets the planner trust this
   // when the article is explicit and fall back to the regex when not.
   accepts_reservations: boolean | null
+  // Tri-state. Only `true` causes the row to carry the `'alcohol_free'`
+  // dietary flag — `false` and `null` leave the flag absent, matching the
+  // conservative dietary semantics (a dietary hard-stop only fires when the
+  // venue is *explicitly* known to satisfy it).
+  alcohol_free: boolean | null
   // Weekly hours pulled from the article body. Null when the article doesn't
   // state hours; the row then falls back to cuisine-typed defaults.
   hours: ExtractedHoursJson | null
@@ -225,7 +230,7 @@ type VenueRow = {
   address: string
   cuisine_tags: string[]
   vibe_tags: string[]
-  dietary_flags: []
+  dietary_flags: ('alcohol_free')[]
   budget_band: 2
   is_outdoor: boolean
   photo_url: string | null
@@ -537,13 +542,17 @@ Return every Singapore restaurant, café, bar, or food venue clearly described i
     - true: the article mentions reservations, bookings, a reservation phone line, Chope/SevenRooms/OpenTable, "book a table", "reservations recommended", or describes the venue as a sit-down restaurant where bookings are clearly typical.
     - false: the article explicitly says the venue is walk-in only, "no reservations", "first-come first-served", "queue", or describes it as a hawker stall, food-court tenant, kopitiam, coffee shop, or a small zi char / sliced-fish / bak kut teh / chicken-rice / laksa / prata-style stall where reservations are not taken.
     - null: the article doesn't say either way and the venue type isn't clearly one or the other. Prefer null over guessing.
+- alcohol_free: true / false / null based on what the article says about alcohol.
+    - true: explicit "halal", "dry", "no alcohol", "alcohol-free", "non-alcoholic only", "sober bar", or clearly a venue type that doesn't serve alcohol (juice bar, kopitiam, hawker stall, dessert-only, kid-focused cafe with no bar).
+    - false: the article mentions cocktails, wine, beer, sake, a "drinks menu" with alcohol, a wine list, sake pairing, a bar program, or describes the venue as a bar / cocktail bar / wine bar / speakeasy / izakaya.
+    - null: the article doesn't say either way and the venue type isn't clearly one or the other. Prefer null over guessing.
 - hours: weekly opening hours if the article states them in any parseable form (e.g. "Tues–Sun, 6pm–late", "Daily, 11.30am–10pm", "Closed Mondays"). Return an object keyed by day codes mon/tue/wed/thu/fri/sat/sun, with each value an ARRAY of {open, close} windows. Times MUST be 4-digit HHMM strings in 24-hour SGT (e.g. "1130", "2200", "0030" for past midnight). Days the venue is closed should be an empty array. Two windows are allowed for split service (lunch + dinner). Return null if the article doesn't mention hours, or if you can't confidently parse them. DO NOT guess.
 
 Skip venues outside Singapore. Skip venues mentioned only in passing without enough detail to plan a visit.
 
 Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
 [
-  { "name": "...", "address": "...", "cuisine_tags": [...], "vibe_tags": [...], "opens_at": null, "ends_at": null, "photo_url": null, "is_new_opening": false, "is_limited_run": false, "is_award_winner": false, "award_name": null, "accepts_reservations": null, "hours": null }
+  { "name": "...", "address": "...", "cuisine_tags": [...], "vibe_tags": [...], "opens_at": null, "ends_at": null, "photo_url": null, "is_new_opening": false, "is_limited_run": false, "is_award_winner": false, "award_name": null, "accepts_reservations": null, "alcohol_free": null, "hours": null }
 ]`
 
   const result = await ai.models.generateContent({
@@ -619,6 +628,9 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
           ? false
           : null
 
+    const alcohol_free =
+      v.alcohol_free === true ? true : v.alcohol_free === false ? false : null
+
     const is_award_winner = v.is_award_winner === true
     const award_name =
       is_award_winner && typeof v.award_name === 'string' && v.award_name.trim()
@@ -638,6 +650,7 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
       is_award_winner,
       award_name,
       accepts_reservations,
+      alcohol_free,
       hours: parseExtractedHours(v.hours),
     })
   }
@@ -1086,6 +1099,9 @@ async function processDiningArticle(
     else if (isAward) badge = 'award_fresh'
     else badge = 'none'
 
+    const dietary_flags: ('alcohol_free')[] = []
+    if (venue.alcohol_free === true) dietary_flags.push('alcohol_free')
+
     rows.push({
       source: 'editorial',
       source_id,
@@ -1096,7 +1112,7 @@ async function processDiningArticle(
       address: location.resolvedAddress,
       cuisine_tags: venue.cuisine_tags,
       vibe_tags: venue.vibe_tags,
-      dietary_flags: [],
+      dietary_flags,
       budget_band: 2,
       is_outdoor: false,
       photo_url: venue.photo_url,
