@@ -33,7 +33,7 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: 'all', label: 'All' },
-  { key: 'recommended', label: 'Recommended' },
+  { key: 'recommended', label: "Critics' picks" },
   { key: 'limited', label: 'Limited-run' },
   { key: 'new', label: 'Just opened' },
   { key: 'shortlist', label: '★ Shortlist' },
