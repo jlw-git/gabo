@@ -143,7 +143,7 @@ The v1 buckets (Easy yes / A small detour / Worth the leap) have been **replaced
 
 | Filter | Logic |
 |---|---|
-| All | every card in the tab |
+| All | union of Recommended ∪ Limited-run ∪ Just opened (a card must match at least one badge chip) |
 | Recommended | `badge ∈ {critic_pick, award_fresh}` OR `trending_score ≥ 0.7` |
 | Limited-run | `badge = closing_soon` |
 | Just opened | `badge = soft_launch` |
