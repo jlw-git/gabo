@@ -333,7 +333,9 @@ export function ResultsView({
 function applyFilter(cards: PlanCardType[], filter: Filter, shortlist: Set<string>): PlanCardType[] {
   switch (filter) {
     case 'all':
-      return cards
+      return cards.filter(
+        (c) => isRecommended(c) || hasClosingSoonLabel(c) || hasJustOpenedLabel(c),
+      )
     case 'recommended':
       return cards.filter(isRecommended)
     case 'limited':
