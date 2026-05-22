@@ -11,10 +11,13 @@
 //   - No re-ranking: we trust the score formula; Gemini enriches, doesn't reorder.
 
 import { GoogleGenAI } from '@google/genai'
+import { COPY_MODEL } from '@/lib/agents/models'
 import type { PlanCard, Profile } from './types'
 import type { WeatherResult } from '@/lib/weather'
 
-const EVAL_TIMEOUT_MS = 3000
+// 8s budget — flash-lite typically returns in 2–4s for a 10-candidate batch.
+// 3s was too tight in practice (most plans timed out on real network).
+const EVAL_TIMEOUT_MS = 8000
 const MAX_CANDIDATES = 10 // top 5 dining + top 5 events
 
 type EvalRow = { id: string; why: string }
@@ -110,7 +113,7 @@ Return ONLY a raw JSON array, no markdown, no explanation:
 async function callGemini(prompt: string): Promise<Map<string, string>> {
   const ai = geminiClient()
   const result = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: COPY_MODEL,
     contents: prompt,
   })
 
@@ -152,5 +155,5 @@ export async function evaluateCandidates(
     new Promise<Map<string, string>>((resolve) =>
       setTimeout(() => resolve(new Map()), EVAL_TIMEOUT_MS)
     ),
-  ]).catch(() => new Map())
+  ]).catch(() => new Map<string, string>())
 }

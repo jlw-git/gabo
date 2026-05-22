@@ -23,6 +23,8 @@
 
 import * as cheerio from 'cheerio'
 import { GoogleGenAI } from '@google/genai'
+import { EXTRACTION_MODEL } from '@/lib/agents/models'
+import { verifyBlogExtraction } from '@/lib/agents/verifiers/blog-extraction'
 import { mapWithConcurrency } from '@/lib/async/pool'
 import { searchPlaces } from '@/lib/onemap/client'
 import { createServiceRoleClient } from '@/lib/supabase/server'
@@ -208,6 +210,14 @@ export type BlogScanSummary = {
   articles_checked: number
   articles_matched: number
   venues_extracted: number
+  // Verifier passes — the LLM-as-judge step between extraction and address
+  // resolution. `verified` counts rows that passed cleanly; `soft_flagged`
+  // counts rows upserted with verifier_flagged=true in badge_meta;
+  // `hard_rejected` counts rows dropped before OneMap. Sum of all three
+  // equals venues_extracted minus extractor-side filtering.
+  verified: number
+  soft_flagged: number
+  hard_rejected: number
   addresses_validated: number
   already_in_catalog: number
   upserted: number
@@ -248,6 +258,11 @@ type VenueRow = {
     source?: string | null
     reason?: string
     hours_source: 'default' | 'extracted'
+    // Set true when the LLM verifier returned 'soft_flag' for this row.
+    // PlanCard / UI does not surface this today; downstream reporting + a
+    // future hide-flagged-rows toggle read it.
+    verifier_flagged?: boolean
+    verifier_reason?: string
   }
   trending_score: 0
   active: true
@@ -556,7 +571,7 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
 ]`
 
   const result = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: EXTRACTION_MODEL,
     contents: prompt,
   })
 
@@ -744,7 +759,7 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
 ]`
 
   const result = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: EXTRACTION_MODEL,
     contents: prompt,
   })
 
@@ -928,6 +943,9 @@ export async function scanBlogs(): Promise<BlogScanSummary> {
     articles_checked: 0,
     articles_matched: 0,
     venues_extracted: 0,
+    verified: 0,
+    soft_flagged: 0,
+    hard_rejected: 0,
     addresses_validated: 0,
     already_in_catalog: 0,
     upserted: 0,
@@ -1059,6 +1077,25 @@ async function processDiningArticle(
   const rows: VenueRow[] = []
   for (const venue of venues) {
     summary.venues_extracted++
+
+    // Verifier gate: LLM-as-judge against the source article. Hard rejects
+    // skip the row entirely (don't even pay the OneMap call); soft flags
+    // pass through but get badge_meta annotation. Verifier outages return
+    // 'pass' (see runner.verify) so this cron never hangs on Gemini.
+    const verdict = await verifyBlogExtraction({ articleText: text, venue }).catch(
+      () => ({ verdict: 'pass' as const, confidence: 0, reason: 'verifier error' })
+    )
+    if (verdict.verdict === 'hard_reject') {
+      summary.hard_rejected++
+      summary.errors.push(
+        `${blog.name} "${venue.name}": verifier hard-rejected — ${verdict.reason}`
+      )
+      continue
+    }
+    const verifierFlagged = verdict.verdict === 'soft_flag'
+    if (verifierFlagged) summary.soft_flagged++
+    else summary.verified++
+
     const location = await resolveAddress(venue.name, venue.address).catch(() => null)
     if (!location) {
       summary.errors.push(
@@ -1092,6 +1129,10 @@ async function processDiningArticle(
     if (isLimited) badgeMeta.ends_at = venue.ends_at
     if (isNew) badgeMeta.opened = venue.opens_at
     if (isAward) badgeMeta.award = venue.award_name
+    if (verifierFlagged) {
+      badgeMeta.verifier_flagged = true
+      badgeMeta.verifier_reason = verdict.reason
+    }
 
     let badge: VenueRow['badge']
     if (isLimited) badge = 'closing_soon'
@@ -1162,6 +1203,31 @@ async function processExperienceArticle(
   const rows: VenueRow[] = []
   for (const exp of experiences) {
     summary.venues_extracted++
+
+    // Verifier gate — same two-tier policy as the dining path. Pass the
+    // tri-shape of date fields through (experiences carry starts_at/ends_at
+    // and opens_at for permanent new venues).
+    const verdict = await verifyBlogExtraction({
+      articleText: text,
+      venue: {
+        name: exp.name,
+        address: exp.address,
+        opens_at: exp.opens_at,
+        starts_at: exp.starts_at,
+        ends_at: exp.ends_at,
+      },
+    }).catch(() => ({ verdict: 'pass' as const, confidence: 0, reason: 'verifier error' }))
+    if (verdict.verdict === 'hard_reject') {
+      summary.hard_rejected++
+      summary.errors.push(
+        `${blog.name} "${exp.name}": verifier hard-rejected — ${verdict.reason}`
+      )
+      continue
+    }
+    const verifierFlagged = verdict.verdict === 'soft_flag'
+    if (verifierFlagged) summary.soft_flagged++
+    else summary.verified++
+
     const location = await resolveAddress(exp.name, exp.address).catch(() => null)
     if (!location) {
       summary.errors.push(
@@ -1192,6 +1258,10 @@ async function processExperienceArticle(
     if (exp.starts_at) badgeMeta.starts_at = exp.starts_at
     if (exp.ends_at) badgeMeta.ends_at = exp.ends_at
     if (isNewOpening) badgeMeta.opened = exp.opens_at
+    if (verifierFlagged) {
+      badgeMeta.verifier_flagged = true
+      badgeMeta.verifier_reason = verdict.reason
+    }
 
     let badge: VenueRow['badge']
     if (closingSoon) badge = 'closing_soon'

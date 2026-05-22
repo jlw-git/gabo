@@ -14,6 +14,8 @@
 // the Maps Platform GOOGLE_PLACES_API_KEY)
 
 import { GoogleGenAI } from '@google/genai'
+import { EXTRACTION_MODEL } from '@/lib/agents/models'
+import { verifyMuseumExhibition } from '@/lib/agents/verifiers/museum-extraction'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 import type { HoursJson } from '@/lib/planner/types'
 import { editorialEventToVenue, type EditorialEvent } from './editorial-events'
@@ -155,7 +157,7 @@ async function searchExhibitions(museum: MuseumConfig): Promise<RawExhibition[]>
   const ai = geminiClient()
 
   const result = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: EXTRACTION_MODEL,
     contents: `Search for current and upcoming exhibitions at ${museum.name} in Singapore.
 Today is ${today}. Only include exhibitions running now or opening within the next 6 months.
 Return ONLY a raw JSON array with no markdown, no explanation. Each item must have:
@@ -186,6 +188,11 @@ export type MuseumAgentSummary = {
   refreshed_at: string
   museums_checked: number
   exhibitions_found: number
+  // Verifier outcomes. `verified` + `soft_flagged` are upserted; `hard_rejected`
+  // is dropped. soft_flagged rows carry verifier_flagged=true in badge_meta.
+  verified: number
+  soft_flagged: number
+  hard_rejected: number
   already_in_catalog: number
   upserted: number
   deactivated: number
@@ -197,6 +204,9 @@ export async function runMuseumAgent(): Promise<MuseumAgentSummary> {
     refreshed_at: new Date().toISOString(),
     museums_checked: 0,
     exhibitions_found: 0,
+    verified: 0,
+    soft_flagged: 0,
+    hard_rejected: 0,
     already_in_catalog: 0,
     upserted: 0,
     deactivated: 0,
@@ -246,6 +256,10 @@ export async function runMuseumAgent(): Promise<MuseumAgentSummary> {
 
   // Step 2: Discover exhibitions for each museum.
   const allEvents: EditorialEvent[] = []
+  // Track verifier verdicts so we can stamp badge_meta after the
+  // EditorialEvent → venue row conversion (editorialEventToVenue builds
+  // badge_meta itself; we layer verifier annotation on top).
+  const softFlagsBySourceId = new Map<string, string>()
 
   for (const museum of MUSEUMS) {
     summary.museums_checked++
@@ -254,8 +268,29 @@ export async function runMuseumAgent(): Promise<MuseumAgentSummary> {
       summary.exhibitions_found += exhibitions.length
 
       for (const ex of exhibitions) {
+        const verdict = await verifyMuseumExhibition({
+          museumName: museum.name,
+          exhibition: ex,
+        }).catch(() => ({ verdict: 'pass' as const, confidence: 0, reason: 'verifier error' }))
+
+        if (verdict.verdict === 'hard_reject') {
+          summary.hard_rejected++
+          summary.errors.push(
+            `${museum.name} "${ex.name}": verifier hard-rejected — ${verdict.reason}`
+          )
+          continue
+        }
+
+        const sourceId = `${museum.source_prefix}-${slugify(ex.name)}`
+        if (verdict.verdict === 'soft_flag') {
+          summary.soft_flagged++
+          softFlagsBySourceId.set(sourceId, verdict.reason)
+        } else {
+          summary.verified++
+        }
+
         allEvents.push({
-          source_id: `${museum.source_prefix}-${slugify(ex.name)}`,
+          source_id: sourceId,
           source_url: ex.source_url,
           name: ex.name,
           address: museum.address,
@@ -289,8 +324,22 @@ export async function runMuseumAgent(): Promise<MuseumAgentSummary> {
 
   summary.already_in_catalog = (existing ?? []).length
 
-  // Step 4: Upsert all found exhibitions.
-  const venues = allEvents.map(editorialEventToVenue)
+  // Step 4: Upsert all found exhibitions. After the canonical event→venue
+  // conversion, stamp verifier_flagged into badge_meta for any row that the
+  // verifier flagged but didn't hard-reject. The PlanCard / UI doesn't
+  // surface this yet — it's persisted for cron reporting and future filtering.
+  const venues = allEvents.map((e) => {
+    const venue = editorialEventToVenue(e)
+    const reason = softFlagsBySourceId.get(e.source_id)
+    if (reason) {
+      venue.badge_meta = {
+        ...(venue.badge_meta as Record<string, unknown>),
+        verifier_flagged: true,
+        verifier_reason: reason,
+      }
+    }
+    return venue
+  })
   const chunkSize = 20
   for (let i = 0; i < venues.length; i += chunkSize) {
     const chunk = venues.slice(i, i + chunkSize)

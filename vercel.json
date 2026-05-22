@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/sync-blogs",
       "schedule": "0 9 * * 2"
+    },
+    {
+      "path": "/api/cron/verify-freshness",
+      "schedule": "0 5 * * 2"
     }
   ]
 }

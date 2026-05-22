@@ -12,6 +12,10 @@ type Props = {
     override_tags: string[]
     startADetails: PlaceSelection | null
     startBDetails: PlaceSelection | null
+    // Optional free-text description. When set, the page handler runs the
+    // triage agent (/api/plan/triage) to enrich profile / start points /
+    // override_tags before calling /api/plan. Empty string means no triage.
+    freeform: string
   }) => void
   disabled?: boolean
   defaultStartA?: PlaceSelection | null
@@ -39,6 +43,8 @@ export function PlanDateForm({
   const [occasion, setOccasion] = useState<Override[]>([])
   const [customOccasion, setCustomOccasion] = useState('')
   const [moreOpen, setMoreOpen] = useState(false)
+  const [freeformOpen, setFreeformOpen] = useState(false)
+  const [freeform, setFreeform] = useState('')
 
   const canSubmit = !!time
 
@@ -58,6 +64,7 @@ export function PlanDateForm({
       override_tags,
       startADetails: youStart,
       startBDetails: partnerStart,
+      freeform: freeform.trim(),
     })
   }
 
@@ -135,6 +142,14 @@ export function PlanDateForm({
           >
             {moreOpen ? 'Less options ▴' : 'Special occasion? ▾'}
           </button>
+          <button
+            type="button"
+            onClick={() => setFreeformOpen((o) => !o)}
+            className="rounded-full px-2 py-1 text-xs font-medium text-stone-500 hover:text-stone-800"
+            aria-expanded={freeformOpen}
+          >
+            {freeformOpen ? 'Hide notes ▴' : 'Describe it in your own words ▾'}
+          </button>
           {!moreOpen &&
             occasion.map((tag) => (
               <span
@@ -175,6 +190,22 @@ export function PlanDateForm({
                 className="min-w-[180px] flex-1 rounded-full bg-stone-50 px-3 py-1.5 text-xs ring-1 ring-stone-200 placeholder:text-stone-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-300"
               />
             </div>
+          </div>
+        )}
+
+        {freeformOpen && (
+          <div className="mt-3 border-t border-stone-100 pt-3">
+            <textarea
+              value={freeform}
+              onChange={(e) => setFreeform(e.target.value)}
+              placeholder="Anniversary dinner near Marina Bay, my wife loves Italian, no seafood…"
+              maxLength={600}
+              rows={3}
+              className="w-full resize-none rounded-xl bg-stone-50 px-3 py-2 text-sm ring-1 ring-stone-200 placeholder:text-stone-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-300"
+            />
+            <p className="mt-1.5 text-[11px] text-stone-400">
+              We&rsquo;ll interpret this and pre-fill anything we can — your chips above always win.
+            </p>
           </div>
         )}
       </form>

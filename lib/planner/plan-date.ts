@@ -1,5 +1,6 @@
 import { mapWithConcurrency } from '@/lib/async/pool'
 import { fetchDriveRoute, type DriveRouteResult } from '@/lib/onemap/client'
+import { evaluateCandidates } from '@/lib/planner/gemini-eval'
 import { isVenueOpenAt } from '@/lib/planner/hours'
 import type { PlanRequest } from '@/lib/planner/request-validation'
 import {
@@ -9,7 +10,7 @@ import {
   scoreWithSingleEta,
   scoreWithoutEtas,
 } from '@/lib/planner/score'
-import type { LatLng, Profile, Venue } from '@/lib/planner/types'
+import type { LatLng, PlanCard, Profile, Venue } from '@/lib/planner/types'
 import { createClient } from '@/lib/supabase/server'
 import { fetchWeatherCondition, type WeatherResult } from '@/lib/weather'
 
@@ -151,6 +152,28 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
   const buckets = bucketByCategory(ranked)
   const totalCards = buckets.dining.length + buckets.events.length
 
+  // Gemini copy enrichment. evaluateCandidates() carries its own 8s timeout +
+  // graceful fallback, so we await it on the critical path — the worst case
+  // adds ~3s in normal operation, less if the Map comes back empty. The cards
+  // remain usable either way: PlanCard falls back to formula-derived body
+  // copy when `why` is absent (see components/PlanCard.tsx).
+  const allCards: PlanCard[] = [...buckets.dining, ...buckets.events]
+  const whyMap = await evaluateCandidates(
+    allCards,
+    profile,
+    weather,
+    scheduledDate,
+    request.override_tags
+  )
+  if (whyMap.size > 0) {
+    const stamp = (c: PlanCard): PlanCard => {
+      const why = whyMap.get(c.id)
+      return why ? { ...c, why } : c
+    }
+    buckets.dining = buckets.dining.map(stamp)
+    buckets.events = buckets.events.map(stamp)
+  }
+
   return {
     buckets,
     meta: {
@@ -167,6 +190,7 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
       outdoor_excluded: outdoorExcluded,
       starts_provided: (startA ? 1 : 0) + (startB ? 1 : 0),
       weather,
+      gemini_enriched: whyMap.size,
     },
   }
 }

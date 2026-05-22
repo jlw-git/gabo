@@ -79,4 +79,8 @@ export type Category = 'dining' | 'event'
 
 export type PlanCard = RankedVenue & {
   bucket: Category
+  // LLM-written one-sentence body copy, set by lib/planner/gemini-eval.ts.
+  // PlanCard prefers this over the formula-derived body when present;
+  // absent on cache miss / verifier timeout / Gemini outage.
+  why?: string
 }

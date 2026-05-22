@@ -53,7 +53,10 @@ export function PlanCard({
 }: Props) {
   const event = isEvent(card)
   const labels = badgeLabels(card)
-  const whyForThem = composeWhy(card, profile, labels)
+  // Prefer LLM-written body copy when the planner enriched this card
+  // (lib/planner/gemini-eval.ts). Falls back to the formula composer
+  // when the Gemini call timed out, errored, or didn't return this id.
+  const whyForThem = card.why ?? composeWhy(card, profile, labels)
   const showFairness = card.eta_a_min > 0 || card.eta_b_min > 0
   const showTrending =
     !labels.some((l) => l.key === 'closing_soon') && card.trending_score >= TRENDING_THRESHOLD
