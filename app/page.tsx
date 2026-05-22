@@ -68,6 +68,7 @@ export default function Home() {
     override_tags: string[]
     startADetails: PlaceSelection | null
     startBDetails: PlaceSelection | null
+    freeform: string
   }) {
     if (!stored) return
     // Only persist when both are provided — partial saves would clobber a
@@ -77,16 +78,57 @@ export default function Home() {
       setLastStarts({ a: payload.startADetails, b: payload.startBDetails })
     }
     setStage({ kind: 'loading' })
+
+    // Triage step: if the user typed a free-text description, ask the LLM
+    // to extract structured slots before we hit the planner. Triage carries
+    // its own timeout + graceful fallback in the route handler, so a
+    // failure here cleanly degrades to "submit what the form gave us."
+    let mergedProfile = stored.profile
+    let mergedStartA: LatLng | null = payload.start_a
+    let mergedStartB: LatLng | null = payload.start_b
+    let mergedOverrides = payload.override_tags
+    if (payload.freeform) {
+      try {
+        const tRes = await fetch('/api/plan/triage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            freeform: payload.freeform,
+            partial: {
+              profile: stored.profile,
+              start_a: payload.start_a,
+              start_b: payload.start_b,
+              override_tags: payload.override_tags,
+            },
+          }),
+        })
+        if (tRes.ok) {
+          const tData = (await tRes.json()) as {
+            profile?: typeof stored.profile
+            start_a?: LatLng | null
+            start_b?: LatLng | null
+            override_tags?: string[]
+          }
+          if (tData.profile) mergedProfile = tData.profile
+          if (tData.start_a) mergedStartA = tData.start_a
+          if (tData.start_b) mergedStartB = tData.start_b
+          if (tData.override_tags) mergedOverrides = tData.override_tags
+        }
+      } catch (err) {
+        console.warn('triage failed, falling back to form values', err)
+      }
+    }
+
     try {
       const res = await fetch('/api/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          start_a: payload.start_a,
-          start_b: payload.start_b,
+          start_a: mergedStartA,
+          start_b: mergedStartB,
           scheduled_for: payload.scheduled_for,
-          override_tags: payload.override_tags,
-          profile: stored.profile,
+          override_tags: mergedOverrides,
+          profile: mergedProfile,
           shortlist_ids: loadShortlist(),
         }),
       })
