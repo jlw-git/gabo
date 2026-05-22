@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { recordRun } from '@/lib/agents/run-log'
 import { runMuseumAgent } from '@/lib/sources/museum-agent'
 
 // Monthly museum exhibition discovery. Uses Claude + web search to find
@@ -21,6 +22,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const summary = await runMuseumAgent()
+    await recordRun('museums', summary)
     return Response.json(summary)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error'
