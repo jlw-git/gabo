@@ -177,6 +177,13 @@ export function PlanCard({
         <p className="line-clamp-3 h-[3lh] text-sm leading-snug text-stone-700">
           {whyForThem}
         </p>
+        {card.rank_reason && (
+          // Phase 5 — ranker justification for the card's POSITION. Italic +
+          // subtle so it reads as commentary, not core body copy.
+          <p className="-mt-1 line-clamp-2 text-[11px] italic leading-snug text-stone-500">
+            {card.rank_reason}
+          </p>
+        )}
 
         <div className="flex gap-2 pt-1" onClick={stop}>
           {showPrimaryCta && (
