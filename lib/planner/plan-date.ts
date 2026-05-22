@@ -1,3 +1,5 @@
+import { decideRelaxation, MIN_HEALTHY_RESULTS } from '@/lib/agents/relaxation'
+import { rerankBuckets } from '@/lib/agents/ranker'
 import { mapWithConcurrency } from '@/lib/async/pool'
 import { fetchDriveRoute, type DriveRouteResult } from '@/lib/onemap/client'
 import { evaluateCandidates } from '@/lib/planner/gemini-eval'
@@ -5,12 +7,13 @@ import { isVenueOpenAt } from '@/lib/planner/hours'
 import type { PlanRequest } from '@/lib/planner/request-validation'
 import {
   bucketByCategory,
+  type Buckets,
   prescore,
   scoreWithETAs,
   scoreWithSingleEta,
   scoreWithoutEtas,
 } from '@/lib/planner/score'
-import type { LatLng, PlanCard, Profile, Venue } from '@/lib/planner/types'
+import type { LatLng, PlanCard, Profile, RankedVenue, Venue } from '@/lib/planner/types'
 import { createClient } from '@/lib/supabase/server'
 import { fetchWeatherCondition, type WeatherResult } from '@/lib/weather'
 
@@ -103,53 +106,66 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
     )
   }
 
-  let cachedLegs = 0
+  const routeResult = await routeAndScore(
+    topByPrescore,
+    profile,
+    request.override_tags,
+    startA,
+    startB,
+    getDirection
+  )
+  let { ranked, cachedLegs } = routeResult
+  let buckets = bucketByCategory(ranked)
 
-  const routed = await mapWithConcurrency(topByPrescore, ROUTING_CONCURRENCY, async (venue) => {
-    try {
-      if (startA && startB) {
-        const [a, b] = await Promise.all([
-          getDirection(startA, { lat: venue.lat, lng: venue.lng }),
-          getDirection(startB, { lat: venue.lat, lng: venue.lng }),
-        ])
-        if (a.cached) cachedLegs++
-        if (b.cached) cachedLegs++
-        return scoreWithETAs(
-          venue,
-          profile,
-          Math.round(a.duration_sec / 60),
-          Math.round(b.duration_sec / 60),
-          request.override_tags
-        )
-      }
-      if (startA || startB) {
-        const start = (startA ?? startB) as LatLng
-        const a = await getDirection(start, { lat: venue.lat, lng: venue.lng })
-        if (a.cached) cachedLegs++
-        return scoreWithSingleEta(
-          venue,
-          profile,
-          Math.round(a.duration_sec / 60),
-          request.override_tags
-        )
-      }
-      // No start points — islandwide search.
-      return scoreWithoutEtas(venue, profile, request.override_tags)
-    } catch (err) {
-      // Per-venue routing failures used to be silent; if every venue fails
-      // (e.g. OneMap auth misconfigured) the whole plan returns 0 cards
-      // with no signal. Log to Vercel Functions logs so the next breakage
-      // is visible in 30 seconds, not via diagnostic Q&A.
-      console.error(
-        `[plan] routing failed for "${venue.name}" (${venue.lat},${venue.lng}):`,
-        err instanceof Error ? err.message : String(err)
-      )
-      return null
+  // Phase 4 — agentic relaxation. When a bucket comes back thin, ask the
+  // LLM whether to widen the search by dropping SOFT constraints
+  // (cuisine avoidance, budget filter, distance cap, loved-cuisine boost).
+  // Hard filters never relax. Gated by AGENTIC_PLAN_ENABLED so the
+  // pre-Phase-4 behaviour is the default until we measure the new path.
+  const relaxationMeta: {
+    bucket: 'dining' | 'events'
+    dropped: string[]
+    reason: string
+    delta: number
+  }[] = []
+  if (
+    process.env.AGENTIC_PLAN_ENABLED === 'true' &&
+    (buckets.dining.length < MIN_HEALTHY_RESULTS ||
+      buckets.events.length < MIN_HEALTHY_RESULTS)
+  ) {
+    const relaxedOutcome = await relaxAndRetry({
+      venues,
+      candidates,
+      buckets,
+      profile,
+      request,
+      weather,
+      scheduledDate,
+      startA,
+      startB,
+      getDirection,
+    })
+    if (relaxedOutcome) {
+      ranked = relaxedOutcome.ranked
+      cachedLegs += relaxedOutcome.extraCachedLegs
+      buckets = relaxedOutcome.buckets
+      relaxationMeta.push(...relaxedOutcome.relaxationMeta)
     }
-  })
+  }
 
-  const ranked = routed.filter((r): r is NonNullable<typeof r> => r !== null)
-  const buckets = bucketByCategory(ranked)
+  // Phase 5 — LLM-augmented ranker. Re-orders WITHIN A TOLERANCE BAND
+  // (max ±3 positions per card; top-of-formula can't fall below #3) and
+  // stamps a per-card rank_reason. Gated separately so we can ship
+  // relaxation without the ranker and vice versa.
+  let rerankedDining = 0
+  let rerankedEvents = 0
+  if (process.env.AGENTIC_RANKER_ENABLED === 'true') {
+    const out = await rerankBuckets(buckets, profile, weather, scheduledDate, request.override_tags)
+    buckets = out.buckets
+    rerankedDining = out.reranked_dining
+    rerankedEvents = out.reranked_events
+  }
+
   const totalCards = buckets.dining.length + buckets.events.length
 
   // Gemini copy enrichment. evaluateCandidates() carries its own 8s timeout +
@@ -191,7 +207,227 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
       starts_provided: (startA ? 1 : 0) + (startB ? 1 : 0),
       weather,
       gemini_enriched: whyMap.size,
+      // Phase 4 — what the relaxation agent dropped (per bucket) and how
+      // many extra cards each relaxation surfaced. UI surfaces this as a
+      // "We widened the search because…" pill below the results header.
+      agent_relaxation: relaxationMeta,
+      // Phase 5 — how many cards the ranker successfully re-positioned
+      // (within the tolerance band) per bucket. 0 means the ranker either
+      // ran and accepted formula order, or the env flag is off / it failed.
+      ranker: { dining: rerankedDining, events: rerankedEvents },
     },
+  }
+}
+
+// Routing + per-venue scoring. Pulled out of the planDate body so the
+// relaxation path can call it twice — once with the original filter set,
+// once with the agent-chosen widening applied.
+async function routeAndScore(
+  venues: Venue[],
+  profile: Profile,
+  overrideTags: string[],
+  startA: LatLng | null,
+  startB: LatLng | null,
+  getDirection: (origin: LatLng, destination: LatLng) => Promise<DriveRouteResult>
+): Promise<{ ranked: RankedVenue[]; cachedLegs: number }> {
+  let cachedLegs = 0
+  const routed = await mapWithConcurrency(venues, ROUTING_CONCURRENCY, async (venue) => {
+    try {
+      if (startA && startB) {
+        const [a, b] = await Promise.all([
+          getDirection(startA, { lat: venue.lat, lng: venue.lng }),
+          getDirection(startB, { lat: venue.lat, lng: venue.lng }),
+        ])
+        if (a.cached) cachedLegs++
+        if (b.cached) cachedLegs++
+        return scoreWithETAs(
+          venue,
+          profile,
+          Math.round(a.duration_sec / 60),
+          Math.round(b.duration_sec / 60),
+          overrideTags
+        )
+      }
+      if (startA || startB) {
+        const start = (startA ?? startB) as LatLng
+        const a = await getDirection(start, { lat: venue.lat, lng: venue.lng })
+        if (a.cached) cachedLegs++
+        return scoreWithSingleEta(
+          venue,
+          profile,
+          Math.round(a.duration_sec / 60),
+          overrideTags
+        )
+      }
+      // No start points — islandwide search.
+      return scoreWithoutEtas(venue, profile, overrideTags)
+    } catch (err) {
+      // Per-venue routing failures used to be silent; if every venue fails
+      // (e.g. OneMap auth misconfigured) the whole plan returns 0 cards
+      // with no signal. Log to Vercel Functions logs so the next breakage
+      // is visible in 30 seconds, not via diagnostic Q&A.
+      console.error(
+        `[plan] routing failed for "${venue.name}" (${venue.lat},${venue.lng}):`,
+        err instanceof Error ? err.message : String(err)
+      )
+      return null
+    }
+  })
+  const ranked = routed.filter((r): r is NonNullable<typeof r> => r !== null)
+  return { ranked, cachedLegs }
+}
+
+// Relaxation pass. Called only when at least one bucket came back below
+// MIN_HEALTHY_RESULTS. Runs the relaxation agent, applies its toggles to
+// a working copy of the filter+score pipeline, and returns the widened
+// buckets IF they actually grew. If the agent declines to relax (or the
+// widened pass doesn't surface more cards), the original result wins.
+type RelaxAndRetryDeps = {
+  venues: Venue[]
+  candidates: Venue[]
+  buckets: Buckets
+  profile: Profile
+  request: PlanRequest
+  weather: WeatherResult
+  scheduledDate: Date
+  startA: LatLng | null
+  startB: LatLng | null
+  getDirection: (origin: LatLng, destination: LatLng) => Promise<DriveRouteResult>
+}
+
+async function relaxAndRetry(deps: RelaxAndRetryDeps): Promise<{
+  ranked: RankedVenue[]
+  buckets: Buckets
+  extraCachedLegs: number
+  relaxationMeta: { bucket: 'dining' | 'events'; dropped: string[]; reason: string; delta: number }[]
+} | null> {
+  // Ask the agent — once per thin bucket. We ask each bucket separately so
+  // dining can relax cuisine while events relaxes distance, say.
+  const thin: ('dining' | 'events')[] = []
+  if (deps.buckets.dining.length < MIN_HEALTHY_RESULTS) thin.push('dining')
+  if (deps.buckets.events.length < MIN_HEALTHY_RESULTS) thin.push('events')
+  if (thin.length === 0) return null
+
+  const decisions = await Promise.all(
+    thin.map(async (bucket) => ({
+      bucket,
+      decision: await decideRelaxation({
+        bucket,
+        initial_count: deps.buckets[bucket].length,
+        profile: deps.profile,
+        override_tags: deps.request.override_tags,
+        weather_condition: deps.weather.condition,
+        prefilter_total: deps.candidates.length,
+      }),
+    }))
+  )
+
+  // Union the toggled flags across all thin buckets — one widened pass
+  // handles both. (If dining wants cuisine_avoidance dropped and events
+  // wants distance_cap dropped, we drop both; each bucket gets its own
+  // metadata note explaining what was widened for it.)
+  const union = decisions.reduce(
+    (acc, { decision }) => ({
+      drop_cuisine_avoidance: acc.drop_cuisine_avoidance || decision.drop_cuisine_avoidance,
+      drop_budget_filter: acc.drop_budget_filter || decision.drop_budget_filter,
+      drop_distance_cap: acc.drop_distance_cap || decision.drop_distance_cap,
+      drop_match_boost: acc.drop_match_boost || decision.drop_match_boost,
+    }),
+    { drop_cuisine_avoidance: false, drop_budget_filter: false, drop_distance_cap: false, drop_match_boost: false }
+  )
+  const anyToggled =
+    union.drop_cuisine_avoidance ||
+    union.drop_budget_filter ||
+    union.drop_distance_cap ||
+    union.drop_match_boost
+  if (!anyToggled) return null
+
+  // Build a relaxed profile + override set.
+  const relaxedProfile: Profile = {
+    ...deps.profile,
+    cuisines_avoided: union.drop_cuisine_avoidance ? [] : deps.profile.cuisines_avoided,
+    budget_bands: union.drop_budget_filter ? [] : deps.profile.budget_bands,
+    cuisines_loved: union.drop_match_boost ? [] : deps.profile.cuisines_loved,
+  }
+
+  const relaxedCandidates = filterCandidates(
+    deps.venues,
+    relaxedProfile,
+    deps.request.override_tags,
+    deps.weather,
+    deps.scheduledDate
+  )
+  const relaxedTop = [...relaxedCandidates]
+    .sort((a, b) => prescore(b, relaxedProfile) - prescore(a, relaxedProfile))
+    .slice(0, ROUTING_CANDIDATE_CAP)
+
+  if (relaxedTop.length <= deps.candidates.length) {
+    // No new prefilter survivors → nothing to gain.
+    return null
+  }
+
+  const relaxedRoute = await routeAndScore(
+    relaxedTop,
+    relaxedProfile,
+    deps.request.override_tags,
+    deps.startA,
+    deps.startB,
+    deps.getDirection
+  )
+
+  // bucketByCategory applies the 60-min ETA cap. The relaxation toggle
+  // drop_distance_cap means "raise that cap" — implement by widening the
+  // post-bucket pool to include over-60-min cards when the toggle fires.
+  // We do this by short-circuiting bucketByCategory with our own pool.
+  const widenedBuckets = union.drop_distance_cap
+    ? bucketWithoutEtaCap(relaxedRoute.ranked)
+    : bucketByCategory(relaxedRoute.ranked)
+
+  // Only accept the relaxed pass if at least one bucket actually grew.
+  const diningGain = widenedBuckets.dining.length - deps.buckets.dining.length
+  const eventsGain = widenedBuckets.events.length - deps.buckets.events.length
+  if (diningGain <= 0 && eventsGain <= 0) return null
+
+  const relaxationMeta = decisions
+    .map(({ bucket, decision }) => {
+      const dropped: string[] = []
+      if (decision.drop_cuisine_avoidance) dropped.push('cuisine_avoidance')
+      if (decision.drop_budget_filter) dropped.push('budget_filter')
+      if (decision.drop_distance_cap) dropped.push('distance_cap')
+      if (decision.drop_match_boost) dropped.push('match_boost')
+      const delta = bucket === 'dining' ? diningGain : eventsGain
+      return { bucket, dropped, reason: decision.reason, delta }
+    })
+    .filter((m) => m.dropped.length > 0 && m.delta > 0)
+
+  return {
+    ranked: relaxedRoute.ranked,
+    buckets: widenedBuckets,
+    extraCachedLegs: relaxedRoute.cachedLegs,
+    relaxationMeta,
+  }
+}
+
+// Variant of bucketByCategory used ONLY by the relaxation path when the
+// agent has opted to drop the distance cap. We bypass the 60-min ETA filter
+// but keep the per-category cap + dedup + score sort intact. Importing
+// score.ts internals here would be cleaner, but a small local pool keeps
+// the change isolated.
+function bucketWithoutEtaCap(ranked: RankedVenue[]): Buckets {
+  // Defer to the standard bucketing for everything except the ETA filter —
+  // do it by spoofing zero ETAs (which is what bucketByCategory treats as
+  // "no routing", i.e. always-reachable).
+  const fakeUnranked = ranked.map((r) => ({ ...r, eta_a_min: 0, eta_b_min: 0 }))
+  const out = bucketByCategory(fakeUnranked)
+  // Restore real ETAs from the original list (keyed by venue id).
+  const realEtas = new Map(ranked.map((r) => [r.id, { a: r.eta_a_min, b: r.eta_b_min }]))
+  const restore = (c: PlanCard): PlanCard => {
+    const etas = realEtas.get(c.id)
+    return etas ? { ...c, eta_a_min: etas.a, eta_b_min: etas.b } : c
+  }
+  return {
+    dining: out.dining.map(restore),
+    events: out.events.map(restore),
   }
 }
 

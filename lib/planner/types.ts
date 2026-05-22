@@ -83,4 +83,9 @@ export type PlanCard = RankedVenue & {
   // PlanCard prefers this over the formula-derived body when present;
   // absent on cache miss / verifier timeout / Gemini outage.
   why?: string
+  // LLM ranker's per-card justification for the card's POSITION in its
+  // bucket (vs the formula's order). Set by lib/agents/ranker.ts when
+  // AGENTIC_RANKER_ENABLED. UI surfaces this as a small italic line below
+  // `why`. Absent for cards the ranker didn't touch / when the flag is off.
+  rank_reason?: string
 }
