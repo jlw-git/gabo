@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { recordRun } from '@/lib/agents/run-log'
 import { runFreshnessVerifier } from '@/lib/agents/verifiers/freshness'
 
 // Weekly LLM-as-judge pass over the top trending editorial rows. Hard
@@ -19,6 +20,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const summary = await runFreshnessVerifier()
+    await recordRun('freshness', summary)
     return Response.json(summary)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error'

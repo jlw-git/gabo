@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { recordRun } from '@/lib/agents/run-log'
 import { syncDiningCatalog } from '@/lib/sources/dining-sync'
 
 // Refreshes the dining catalog from Google Places (with Foursquare fallback).
@@ -18,6 +19,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const summary = await syncDiningCatalog()
+    await recordRun('dining', summary)
     return Response.json(summary)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error'

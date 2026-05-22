@@ -1,0 +1,152 @@
+{
+  "_doc": "Representative PlanRequest payloads for the ranker A/B harness (scripts/agent-eval.mjs). Each fixture exercises a different code path: rainy day excludes outdoor venues; anniversary boosts the freshness weight in the score formula; narrow cuisine + small budget tests the relaxation path; islandwide (no start points) skips routing. scheduled_for dates are fixed-future so re-runs are stable.",
+  "fixtures": [
+    {
+      "name": "standard-friday-dinner",
+      "_purpose": "Baseline. Two start points, broad profile, mid-week evening. Expect both buckets full (6+6) and ranker reordering modest.",
+      "request": {
+        "start_a": { "lat": 1.3181, "lng": 103.8924 },
+        "start_b": { "lat": 1.3329, "lng": 103.7436 },
+        "scheduled_for": "2026-06-26T19:30:00+08:00",
+        "override_tags": [],
+        "profile": {
+          "planner_name": "You",
+          "partner_name": "Partner",
+          "cuisines_loved": ["japanese", "italian"],
+          "cuisines_avoided": [],
+          "dietary_hardstops": [],
+          "vibe_defaults": ["cozy"],
+          "budget_bands": [2, 3],
+          "transit_pref": "either"
+        },
+        "shortlist_ids": []
+      }
+    },
+    {
+      "name": "anniversary-celebratory",
+      "_purpose": "Celebratory weight kicks in (anniversary override). Ranker should favour award_fresh / critic_pick badges and a fair fairness_gap_min. Late-evening Saturday slot.",
+      "request": {
+        "start_a": { "lat": 1.3000, "lng": 103.8520 },
+        "start_b": { "lat": 1.3210, "lng": 103.8420 },
+        "scheduled_for": "2026-06-27T20:00:00+08:00",
+        "override_tags": ["anniversary"],
+        "profile": {
+          "planner_name": "You",
+          "partner_name": "Partner",
+          "cuisines_loved": ["french", "modern_european"],
+          "cuisines_avoided": [],
+          "dietary_hardstops": [],
+          "vibe_defaults": ["celebratory"],
+          "budget_bands": [3, 4],
+          "transit_pref": "either"
+        },
+        "shortlist_ids": []
+      }
+    },
+    {
+      "name": "narrow-vegetarian-budget",
+      "_purpose": "Hard vegetarian override + $$ ceiling. Likely thin results -> exercises the relaxation agent when AGENTIC_PLAN_ENABLED. Verifies hard filters (dietary) are NOT relaxed.",
+      "request": {
+        "start_a": { "lat": 1.2810, "lng": 103.8430 },
+        "start_b": null,
+        "scheduled_for": "2026-06-28T13:00:00+08:00",
+        "override_tags": ["vegetarian"],
+        "profile": {
+          "planner_name": "You",
+          "partner_name": "Partner",
+          "cuisines_loved": ["indian", "cafe"],
+          "cuisines_avoided": ["seafood"],
+          "dietary_hardstops": ["vegetarian_friendly"],
+          "vibe_defaults": ["low_key"],
+          "budget_bands": [1, 2],
+          "transit_pref": "mrt"
+        },
+        "shortlist_ids": []
+      }
+    },
+    {
+      "name": "islandwide-no-starts",
+      "_purpose": "No start points -> bypasses OneMap routing, uses scoreWithoutEtas. Ranker should still annotate even though fairness component is zeroed.",
+      "request": {
+        "start_a": null,
+        "start_b": null,
+        "scheduled_for": "2026-06-29T19:00:00+08:00",
+        "override_tags": [],
+        "profile": {
+          "planner_name": "You",
+          "partner_name": "Partner",
+          "cuisines_loved": [],
+          "cuisines_avoided": [],
+          "dietary_hardstops": [],
+          "vibe_defaults": [],
+          "budget_bands": [],
+          "transit_pref": "either"
+        },
+        "shortlist_ids": []
+      }
+    },
+    {
+      "name": "birthday-adventurous-late",
+      "_purpose": "Birthday override + adventurous vibe + late slot (21:30). Stresses isVenueOpenAt + late-night dining surfacing. Ranker should favour limited-run/just-opened over generic cards.",
+      "request": {
+        "start_a": { "lat": 1.3000, "lng": 103.8550 },
+        "start_b": { "lat": 1.3500, "lng": 103.7700 },
+        "scheduled_for": "2026-07-03T21:30:00+08:00",
+        "override_tags": ["birthday"],
+        "profile": {
+          "planner_name": "You",
+          "partner_name": "Partner",
+          "cuisines_loved": ["korean", "thai"],
+          "cuisines_avoided": [],
+          "dietary_hardstops": [],
+          "vibe_defaults": ["adventurous", "celebratory"],
+          "budget_bands": [2, 3],
+          "transit_pref": "grab"
+        },
+        "shortlist_ids": []
+      }
+    },
+    {
+      "name": "weekend-brunch-quiet",
+      "_purpose": "Sunday late-morning brunch. Two homes near each other (low fairness_gap_min). low_key vibe filters out celebratory venues.",
+      "request": {
+        "start_a": { "lat": 1.2960, "lng": 103.7950 },
+        "start_b": { "lat": 1.3000, "lng": 103.7990 },
+        "scheduled_for": "2026-06-28T11:00:00+08:00",
+        "override_tags": [],
+        "profile": {
+          "planner_name": "You",
+          "partner_name": "Partner",
+          "cuisines_loved": ["brunch", "cafe", "bakery"],
+          "cuisines_avoided": [],
+          "dietary_hardstops": [],
+          "vibe_defaults": ["low_key", "cozy"],
+          "budget_bands": [2],
+          "transit_pref": "either"
+        },
+        "shortlist_ids": []
+      }
+    },
+    {
+      "name": "no-alcohol-override",
+      "_purpose": "no_alcohol override -> hard filter on alcohol_free flag. Exercises Phase 1A verifier path (alcohol_free extraction). Should NOT relax cuisine_avoidance to widen.",
+      "request": {
+        "start_a": { "lat": 1.3210, "lng": 103.8420 },
+        "start_b": { "lat": 1.3340, "lng": 103.8500 },
+        "scheduled_for": "2026-06-30T19:00:00+08:00",
+        "override_tags": ["no_alcohol"],
+        "profile": {
+          "planner_name": "You",
+          "partner_name": "Partner",
+          "cuisines_loved": ["middle_eastern", "mediterranean"],
+          "cuisines_avoided": [],
+          "dietary_hardstops": ["alcohol_free"],
+          "vibe_defaults": ["cozy"],
+          "budget_bands": [2, 3],
+          "transit_pref": "either"
+        },
+        "shortlist_ids": []
+      }
+    }
+  ]
+}
