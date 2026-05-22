@@ -46,3 +46,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# A/B harness outputs (see scripts/README.md)
+scripts/agent-eval-out/
