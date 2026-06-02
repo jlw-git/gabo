@@ -20,7 +20,11 @@ import { WhatsAppShareModal } from './WhatsAppShareModal'
 import { VenueDetailModal } from './VenueDetailModal'
 import { OverviewMap } from './OverviewMap'
 import { RefineBar, type ChatTurn, type RefineResult } from './RefineBar'
+import { ItineraryView } from './ItineraryView'
+import type { Itinerary } from '@/lib/planner/itinerary'
 import type { PlanRequest } from '@/lib/planner/request-validation'
+
+const ITINERARY_ENABLED = process.env.NEXT_PUBLIC_AGENTIC_ITINERARY_ENABLED === 'true'
 
 export type Buckets = {
   dining: PlanCardType[]
@@ -86,7 +90,10 @@ export function ResultsView({
   const [booking, setBooking] = useState<PlanCardType | null>(null)
   const [shared, setShared] = useState<PlanCardType | null>(null)
   const [details, setDetails] = useState<PlanCardType | null>(null)
-  const [view, setView] = useState<'list' | 'map'>('list')
+  const [view, setView] = useState<'list' | 'map' | 'itinerary'>('list')
+  // F2 itinerary: composed lazily the first time the user opens the view.
+  const [itineraries, setItineraries] = useState<Itinerary[] | null>(null)
+  const [itinLoading, setItinLoading] = useState(false)
   const [tab, setTab] = useState<Tab>('dining')
   const [filter, setFilter] = useState<Filter>('all')
   const [shortlist, setShortlist] = useState<Set<string>>(new Set())
@@ -112,6 +119,35 @@ export function ResultsView({
       saveShortlist([...next])
       return next
     })
+  }
+
+  // F2: switch to the itinerary view, composing on first open (lazy). The
+  // composer reuses the buckets already on screen — no re-plan.
+  async function openItinerary() {
+    setView('itinerary')
+    if (itineraries !== null || itinLoading) return
+    setItinLoading(true)
+    try {
+      const res = await fetch('/api/plan/itinerary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dining: buckets.dining,
+          events: buckets.events,
+          scheduled_for: scheduledFor.toISOString(),
+          mode,
+        }),
+      })
+      const data = res.ok
+        ? ((await res.json()) as { itineraries: Itinerary[] })
+        : { itineraries: [] }
+      setItineraries(data.itineraries ?? [])
+    } catch (err) {
+      console.error('itinerary compose failed', err)
+      setItineraries([])
+    } finally {
+      setItinLoading(false)
+    }
   }
 
   const totalCards = buckets.dining.length + buckets.events.length
@@ -220,6 +256,13 @@ export function ResultsView({
               >
                 <ViewTab active={view === 'list'} onClick={() => setView('list')} label="List" />
                 <ViewTab active={view === 'map'} onClick={() => setView('map')} label="Map" />
+                {ITINERARY_ENABLED && (
+                  <ViewTab
+                    active={view === 'itinerary'}
+                    onClick={openItinerary}
+                    label="✨ Evening"
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -272,6 +315,20 @@ export function ResultsView({
           onSelect={(card) => setDetails(card)}
         />
       )}
+
+      {totalCards > 0 &&
+        view === 'itinerary' &&
+        (itinLoading ? (
+          <div className="flex flex-col items-center gap-3 rounded-2xl bg-white p-10 ring-1 ring-stone-200">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-rose-200 border-t-rose-600" />
+            <p className="text-sm text-stone-600">Composing your evening…</p>
+          </div>
+        ) : (
+          <ItineraryView
+            itineraries={itineraries ?? []}
+            onOpenDetails={(card) => setDetails(card)}
+          />
+        ))}
 
       {totalCards > 0 && view === 'list' && (
         <div>

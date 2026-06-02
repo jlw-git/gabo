@@ -3,6 +3,7 @@
 import { useMemo } from 'react'
 import type { DayKey, HoursWindow, PlanCard as PlanCardType, Profile, TransitMode } from '@/lib/planner/types'
 import { isEvent } from '@/lib/planner/category'
+import { distanceKm } from '@/lib/distance'
 import { directionsUrl } from '@/lib/directions'
 import { photoUrlOrFallback } from '@/lib/photo-fallback'
 import { acceptsReservations } from '@/lib/reservations'
@@ -291,20 +292,6 @@ export function VenueDetailModal({
       </div>
     </div>
   )
-}
-
-function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const R = 6371
-  const dLat = toRad(b.lat - a.lat)
-  const dLng = toRad(b.lng - a.lng)
-  const lat1 = toRad(a.lat)
-  const lat2 = toRad(b.lat)
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
-  return 2 * R * Math.asin(Math.sqrt(h))
-}
-
-function toRad(deg: number): number {
-  return (deg * Math.PI) / 180
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
