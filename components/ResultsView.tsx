@@ -13,6 +13,7 @@ import {
 } from '@/lib/planner/badges'
 import { bookingUrl } from '@/lib/booking-url'
 import { loadShortlist, logShortlistEvent, saveShortlist } from '@/lib/shortlist-storage'
+import { recordTasteEvent } from '@/lib/taste-memory'
 import type { PlaceSelection } from './PlaceSearchInput'
 import { PlanCard } from './PlanCard'
 import { BookingOverlay } from './BookingOverlay'
@@ -115,6 +116,10 @@ export function ResultsView({
       } else {
         next.add(card.id)
         logShortlistEvent(card.id)
+        // F5: feed the longitudinal taste memory (gated, client-only).
+        if (process.env.NEXT_PUBLIC_AGENTIC_TASTE_ENABLED === 'true') {
+          recordTasteEvent(card.cuisine_tags, card.vibe_tags)
+        }
       }
       saveShortlist([...next])
       return next

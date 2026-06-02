@@ -16,7 +16,15 @@ import {
   type StoredProfile,
 } from '@/lib/profile-storage'
 import { loadShortlist } from '@/lib/shortlist-storage'
+import {
+  computeTasteAffinity,
+  enrichProfileWithTaste,
+  loadTasteEvents,
+  tasteSummary,
+} from '@/lib/taste-memory'
 import type { LatLng } from '@/lib/planner/types'
+
+const TASTE_ENABLED = process.env.NEXT_PUBLIC_AGENTIC_TASTE_ENABLED === 'true'
 
 type Diagnostics = {
   candidatesTotal: number
@@ -132,12 +140,18 @@ export default function Home() {
       }
     }
 
+    // F5: enrich the profile with recency-weighted taste learned from saves
+    // (client-only, gated). Additive — never overrides explicit preferences.
+    const finalProfile = TASTE_ENABLED
+      ? enrichProfileWithTaste(mergedProfile, loadTasteEvents(), Date.now())
+      : mergedProfile
+
     const planRequest: PlanRequest = {
       start_a: mergedStartA,
       start_b: mergedStartB,
       scheduled_for: payload.scheduled_for,
       override_tags: mergedOverrides,
-      profile: mergedProfile,
+      profile: finalProfile,
       shortlist_ids: loadShortlist(),
     }
 
@@ -223,6 +237,7 @@ export default function Home() {
       )}
       {hydrated && stage.kind === 'form' && stored && (
         <div className="flex w-full max-w-md flex-col gap-12 md:max-w-3xl lg:max-w-5xl lg:gap-16">
+          {TASTE_ENABLED && <TasteHint />}
           <PlanDateForm
             onSubmit={handlePlan}
             defaultStartA={lastStarts.a}
@@ -263,6 +278,20 @@ export default function Home() {
         </div>
       )}
     </main>
+  )
+}
+
+// F5: explainable taste hint. Reads the local taste log (client-only; this
+// block renders post-hydration so there's no SSR mismatch) and shows the
+// inferred leaning. Renders nothing below the signal floor.
+function TasteHint() {
+  const summary = tasteSummary(computeTasteAffinity(loadTasteEvents(), Date.now()))
+  if (!summary) return null
+  return (
+    <div className="flex items-center gap-2 self-start rounded-full bg-white px-3 py-1.5 text-xs text-stone-600 ring-1 ring-stone-200">
+      <span aria-hidden="true">✨</span>
+      <span>{summary}</span>
+    </div>
   )
 }
 
