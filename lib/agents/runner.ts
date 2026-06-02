@@ -224,3 +224,60 @@ export async function verify(opts: VerifyOptions): Promise<Verdict> {
     reason: out.reason.slice(0, 240),
   }
 }
+
+// ---------------------------------------------------------------------------
+// Verifier debate (F4). A proposer argues the row is grounded; a skeptic tries
+// to refute it. The two opposed verdicts are combined by resolveDebate — a
+// PURE, deterministic function — into the final keep/flag/drop decision. The
+// LLMs only supply arguments; code decides the consequence (roadmap #2).
+// ---------------------------------------------------------------------------
+
+// Pure tie-break. No I/O — unit-testable in isolation.
+//   pass         iff both sides pass
+//   hard_reject  iff the skeptic confidently rejects AND the proposer isn't
+//                strongly defending (so a single confident refutation only
+//                drops a row the proposer can't stand behind)
+//   soft_flag    otherwise — genuine disagreement/uncertainty ships the row
+//                with an annotation rather than silently dropping it
+export function resolveDebate(proposer: Verdict, skeptic: Verdict): Verdict {
+  const strongProposerDefend = proposer.verdict === 'pass' && proposer.confidence >= 0.8
+  const confidentSkepticReject =
+    skeptic.verdict === 'hard_reject' && skeptic.confidence >= 0.7
+
+  let verdict: Verdict['verdict']
+  let confidence: number
+  if (proposer.verdict === 'pass' && skeptic.verdict === 'pass') {
+    verdict = 'pass'
+    confidence = Math.min(proposer.confidence, skeptic.confidence)
+  } else if (confidentSkepticReject && !strongProposerDefend) {
+    verdict = 'hard_reject'
+    confidence = skeptic.confidence
+  } else {
+    verdict = 'soft_flag'
+    confidence = 0.5
+  }
+
+  const reason = `keep: ${proposer.reason || 'n/a'} | reject: ${skeptic.reason || 'n/a'}`.slice(
+    0,
+    240
+  )
+  return { verdict, confidence, reason }
+}
+
+export type DebateOptions = {
+  proposerPrompt: string
+  skepticPrompt: string
+  model: string
+  timeoutMs?: number
+}
+
+// Run proposer + skeptic in parallel, then resolve deterministically. Each side
+// is a verify() call, so a double-outage degrades to pass — identical to the
+// single-judge graceful-degrade contract.
+export async function debateVerdict(opts: DebateOptions): Promise<Verdict> {
+  const [proposer, skeptic] = await Promise.all([
+    verify({ model: opts.model, prompt: opts.proposerPrompt, timeoutMs: opts.timeoutMs }),
+    verify({ model: opts.model, prompt: opts.skepticPrompt, timeoutMs: opts.timeoutMs }),
+  ])
+  return resolveDebate(proposer, skeptic)
+}
