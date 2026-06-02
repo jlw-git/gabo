@@ -15,3 +15,10 @@ export const VERIFIER_MODEL = 'gemini-2.5-flash-lite'
 export const COPY_MODEL = 'gemini-2.5-flash-lite'
 export const TRIAGE_MODEL = 'gemini-2.5-flash-lite'
 export const RANKER_MODEL = 'gemini-2.5-flash-lite'
+
+// Orchestration model for the conversational planner (F1). Drives a bounded
+// tool-use loop (planner-as-tool), so it needs reliable function-calling —
+// 'flash', not 'flash-lite'. This constant is the single swap-point for moving
+// orchestration to Claude later: changing the model here + pointing the loop at
+// the Anthropic SDK is the whole migration (see AGENTIC_ROADMAP.md F1).
+export const ORCHESTRATION_MODEL = 'gemini-2.5-flash'

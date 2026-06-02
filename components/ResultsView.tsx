@@ -19,10 +19,19 @@ import { BookingOverlay } from './BookingOverlay'
 import { WhatsAppShareModal } from './WhatsAppShareModal'
 import { VenueDetailModal } from './VenueDetailModal'
 import { OverviewMap } from './OverviewMap'
+import { RefineBar, type ChatTurn, type RefineResult } from './RefineBar'
+import type { PlanRequest } from '@/lib/planner/request-validation'
 
 export type Buckets = {
   dining: PlanCardType[]
   events: PlanCardType[]
+}
+
+export type Diagnostics = {
+  candidatesTotal: number
+  afterLocalFilters: number
+  relaxationAttempted: boolean
+  startsProvided: 0 | 1 | 2
 }
 
 type Props = {
@@ -34,7 +43,13 @@ type Props = {
   startB: PlaceSelection | null
   weather?: { condition: 'clear' | 'rain'; text: string | null } | null
   outdoorExcluded?: number
+  diagnostics?: Diagnostics
   onBack: () => void
+  // Conversational refine (F1). Optional so non-refine callers still type-check;
+  // RefineBar self-hides when the client flag is off.
+  request?: PlanRequest
+  chat?: ChatTurn[]
+  onRefined?: (userMessage: string, result: RefineResult) => void
 }
 
 type Tab = 'dining' | 'events'
@@ -62,7 +77,11 @@ export function ResultsView({
   startB,
   weather = null,
   outdoorExcluded = 0,
+  diagnostics,
   onBack,
+  request,
+  chat = [],
+  onRefined,
 }: Props) {
   const [booking, setBooking] = useState<PlanCardType | null>(null)
   const [shared, setShared] = useState<PlanCardType | null>(null)
@@ -168,6 +187,10 @@ export function ResultsView({
         </p>
       </header>
 
+      {request && onRefined && (
+        <RefineBar request={request} chat={chat} onRefined={onRefined} />
+      )}
+
       {weather?.condition === 'rain' && outdoorExcluded > 0 && (
         <div className="flex items-start gap-2 rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-900 ring-1 ring-sky-200">
           <span aria-hidden="true">🌧️</span>
@@ -230,26 +253,12 @@ export function ResultsView({
       )}
 
       {totalCards === 0 && (
-        <div className="rounded-2xl bg-white p-6 ring-1 ring-stone-200">
-          <h3 className="text-base font-semibold tracking-tight">Nothing matched your slot.</h3>
-          <p className="mt-1 text-sm text-stone-600">
-            A few things to try:
-          </p>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-stone-600">
-            <li>Pick a later evening or push the time by an hour or two</li>
-            <li>Skip the start points to search islandwide</li>
-            <li>Loosen any cuisine or dietary filters in your profile</li>
-          </ul>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={onBack}
-              className="rounded-xl bg-stone-900 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800"
-            >
-              Edit search
-            </button>
-          </div>
-        </div>
+        <EmptyStateDiagnostic
+          profile={profile}
+          diagnostics={diagnostics}
+          weather={weather}
+          onBack={onBack}
+        />
       )}
 
       {totalCards > 0 && view === 'map' && (
@@ -340,6 +349,91 @@ export function ResultsView({
           onClose={() => setDetails(null)}
         />
       )}
+    </div>
+  )
+}
+
+// Empty-state copy is driven by the meta the planner already returns, not
+// by a static checklist. We pick the most-likely culprit from the drop
+// ratio across hard filters, then offer the matching specific fix instead
+// of the old generic "try X, Y, Z" list.
+function EmptyStateDiagnostic({
+  profile,
+  diagnostics,
+  weather,
+  onBack,
+}: {
+  profile: Profile
+  diagnostics?: Diagnostics
+  weather: { condition: 'clear' | 'rain'; text: string | null } | null
+  onBack: () => void
+}) {
+  const total = diagnostics?.candidatesTotal ?? 0
+  const survived = diagnostics?.afterLocalFilters ?? 0
+  const dropped = Math.max(0, total - survived)
+  const hasBudget = profile.budget_bands.length > 0
+  const hasDietary = profile.dietary_hardstops.length > 0
+  const hasAvoid = profile.cuisines_avoided.length > 0
+  const relaxed = diagnostics?.relaxationAttempted ?? false
+  const startsProvided = diagnostics?.startsProvided ?? 0
+
+  // Heuristic: pick the single most-actionable hint to lead with. Order
+  // matters — narrow data issues first, then constraints, then geography,
+  // then the catch-all.
+  let headline = 'Nothing matched your slot.'
+  let body = "Try a different evening — Singapore's catalog is thinnest at off-hours."
+  let primaryAction: { label: string; subtle?: boolean } | null = null
+
+  if (total === 0) {
+    headline = 'No venues loaded for this search.'
+    body = 'The catalog returned zero rows. This usually means a service is down — try again in a minute, or refresh the page.'
+  } else if (total < 30) {
+    headline = 'Catalog is unusually thin right now.'
+    body = `Only ${total} active venues in the catalog for this search. The data sync may be running behind — try again later.`
+  } else if (survived === 0 && hasDietary) {
+    headline = `We don't yet have ${profile.dietary_hardstops.join(', ')} coverage in the catalog.`
+    body = `${total} venues are open for this slot, but none are tagged with your dietary requirement. We're still backfilling that signal across the catalog.`
+    primaryAction = { label: 'Remove dietary filter in profile' }
+  } else if (relaxed) {
+    headline = 'We widened the search but still came up short.'
+    body = `Out of ${total} venues, ${survived} fit your slot and filters — but none reached the tabs after widening. Try a different evening or remove a start point.`
+  } else if (dropped > 0 && survived > 0 && startsProvided === 2) {
+    headline = `${survived} ${survived === 1 ? 'venue fits' : 'venues fit'} your slot — but none are reachable from both start points within 60 min.`
+    body = 'Drop one start point to search from a single origin, or pick a slot closer to the city centre.'
+  } else if (dropped > 0 && survived > 0) {
+    headline = `${survived} ${survived === 1 ? 'venue passed' : 'venues passed'} your filters — but none scored highly enough to show.`
+    body = 'Try a slightly different time, or loosen filters in your profile.'
+  } else if (dropped > total * 0.8 && (hasBudget || hasAvoid)) {
+    const culprits: string[] = []
+    if (hasBudget) culprits.push('budget')
+    if (hasAvoid) culprits.push('avoid list')
+    headline = `Most venues were ruled out by your ${culprits.join(' and ')}.`
+    body = `Out of ${total} active venues, only ${survived} survived your filters. Loosening one usually opens things up.`
+    primaryAction = { label: 'Edit profile' }
+  } else if (weather?.condition === 'rain') {
+    headline = 'Rain expected — outdoor spots are hidden.'
+    body = "Try an indoor-focused slot or pick a clearer evening."
+  }
+
+  return (
+    <div className="rounded-2xl bg-white p-6 ring-1 ring-stone-200">
+      <h3 className="text-base font-semibold tracking-tight">{headline}</h3>
+      <p className="mt-1 text-sm text-stone-600">{body}</p>
+      {diagnostics && total > 0 && (
+        <p className="mt-3 text-xs text-stone-400">
+          Catalog: {total} active · {survived} fit your slot
+          {relaxed && ' · we tried widening the search'}
+        </p>
+      )}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="rounded-xl bg-stone-900 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800"
+        >
+          {primaryAction?.label ?? 'Edit search'}
+        </button>
+      </div>
     </div>
   )
 }

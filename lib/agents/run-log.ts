@@ -5,7 +5,7 @@
 
 import { createServiceRoleClient } from '@/lib/supabase/server'
 
-export type RunKind = 'blogs' | 'museums' | 'freshness' | 'dining'
+export type RunKind = 'blogs' | 'museums' | 'freshness' | 'dining' | 'conversation'
 
 export async function recordRun(kind: RunKind, summary: unknown): Promise<void> {
   try {
