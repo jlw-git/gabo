@@ -15,11 +15,15 @@
 
 | # | Feature | Status |
 |---|---------|--------|
-| F1 | Conversational planner | ◻ Not started |
-| F2 | Whole-evening itinerary composition | ◻ Not started |
-| F3 | Booking concierge (human-in-the-loop) | ◻ Not started |
-| F4 | Self-healing catalog agent | ◻ Not started |
-| F5 | Longitudinal taste memory | ◻ Not started |
+| F1 | Conversational planner | ◼ Shipped (refine-after-results) |
+| F2 | Whole-evening itinerary composition | ◼ Shipped (dinner → activity) |
+| F3 | Booking concierge (human-in-the-loop) | ◐ Shipped (safeguard scaffold; real booking awaits a provider API) |
+| F4 | Self-healing catalog agent | ◐ Shipped (verifier debate; discovery / self-heal / write-dedup pending) |
+| F5 | Longitudinal taste memory | ◼ Shipped (localStorage) |
+
+All ship **dark behind env flags** on PR #32 (not yet on `main`). Each was
+planned → built → tested → committed; the per-phase boxes below are ticked for
+the delivered slices, with deferred slices left open under "Out of scope" notes.
 
 ---
 
@@ -75,7 +79,7 @@ These land once and underpin F1–F5:
 
 ---
 
-## F1 — Conversational planner  ◻
+## F1 — Conversational planner  ◼ Shipped
 
 **Goal.** Replace the form's ceiling. Handle fuzzy intent the structured form can't:
 *"somewhere romantic but we just ate, maybe a walk near the water, and he hates
@@ -98,15 +102,15 @@ and orchestrates; it does not score or rank.
 clarification fatigue (ask sparingly); flag `AGENTIC_CHAT_ENABLED`.
 
 **Phases.**
-- [ ] Multi-turn intent loop over `triage.ts` → plan request
-- [ ] "Push back and re-plan" turn (consume prior plan + user correction)
-- [ ] Single-clarifying-question heuristic (only when it changes the outcome)
-- [ ] Streaming UI surface (chat-style, falls back to the form)
-- [ ] Flag + runner instrumentation
+- [x] Multi-turn refine loop over the planner (`conversation.ts`; planner-as-tool via `apply_changes`)
+- [x] "Push back and re-plan" turn (consumes the prior request + correction)
+- [x] Single-clarifying-question heuristic (a no-tool turn asks instead of guessing)
+- [ ] Streaming UI surface (deferred — the refine bar is request/response for now)
+- [x] Flag (`AGENTIC_CHAT_ENABLED`) + runner instrumentation (`recordRun('conversation')`)
 
 ---
 
-## F2 — Whole-evening itinerary composition  ◻
+## F2 — Whole-evening itinerary composition  ◼ Shipped
 
 **Goal.** Reason about the *combination*, not independent cards. Dinner at 7 + an
 exhibition that closes at 9 forty minutes away is two good cards and a bad night.
@@ -128,15 +132,15 @@ set. The agent sequences *within* that vetted set; it can't resurrect a filtered
 24-cap); latency (async refinement after the fast plan); flag `AGENTIC_ITINERARY_ENABLED`.
 
 **Phases.**
-- [ ] Inter-stop routing as a tool (reuse OneMap drive/transit)
-- [ ] Itinerary candidate generation over the scored set
-- [ ] Sequencing reasoner (timing, closing windows, weather, pacing)
-- [ ] Itinerary result shape + UI (timeline view alongside cards)
-- [ ] Flag + runner instrumentation
+- [x] Inter-stop routing (reuse OneMap drive/transit, cached)
+- [x] Itinerary candidate generation over the scored buckets
+- [x] Feasibility + sequencing — **deterministic** timing/closing-window check; LLM only picks + narrates
+- [x] Itinerary result shape + "✨ Evening" timeline UI (with alternatives)
+- [x] Flag (`AGENTIC_ITINERARY_ENABLED`) + runner instrumentation (`recordRun('itinerary')`)
 
 ---
 
-## F3 — Booking concierge (human-in-the-loop)  ◻
+## F3 — Booking concierge (human-in-the-loop)  ◐ Shipped (safeguard scaffold)
 
 **Goal.** Move from planner to concierge: check availability, hold/book, calendar,
 prepare the handoff. **The safeguard is the feature.**
@@ -193,19 +197,18 @@ Trust rules:
 - Gate the whole concierge behind `AGENTIC_BOOKING_ENABLED`; ship dark, enable per cohort.
 
 **Phases.**
-- [ ] Action-plan schema + deterministic tier classifier
-- [ ] Read-only availability/policy tools (no gate)
-- [ ] Confirmation card rendering real provider payload (via `BookingOverlay`)
-- [ ] Dry-run / preview mode
-- [ ] Execute layer with idempotency keys + double-book guard
-- [ ] Batched single-confirmation for multi-stop itineraries
-- [ ] Edit-before-send WhatsApp guard (via `WhatsAppShareModal`)
-- [ ] Undo / cancel path
-- [ ] `AGENTIC_BOOKING_ENABLED` flag + full audit logging
+- [x] Action-plan schema + **deterministic tier classifier** (irreversible / reversible / outward)
+- [x] Confirmation card rendering the real payload — venue/date/time/party + named provider (via `BookingOverlay`)
+- [x] Real reversible action: add-to-calendar (`lib/calendar.ts`)
+- [x] Edit-before-send WhatsApp guard (via `WhatsAppShareModal`)
+- [x] `NEXT_PUBLIC_AGENTIC_BOOKING_ENABLED` flag + local audit log (`booking-log`)
+- [ ] Read-only availability/policy tools (needs a provider API)
+- [ ] Execute layer with idempotency + double-book guard (needs a provider API)
+- [ ] Dry-run / preview mode · batched multi-stop confirmation · undo / cancel (post-API)
 
 ---
 
-## F4 — Self-healing catalog agent  ◻
+## F4 — Self-healing catalog agent  ◐ Shipped (verifier debate slice)
 
 **Goal.** Fix the data problem at its root. The catalog pain (Google Places 403 /
 Foursquare 402, blog-scanner stopgap — PRD §6.4) is exactly the schema-flexibility
@@ -229,15 +232,15 @@ verification + dedup gate entry.
 only, never per-request); junk-source guard. Cron-side, so no user latency.
 
 **Phases.**
-- [ ] Link-following / source-discovery loop (seed from current sources)
-- [ ] Cross-reference + dedup against live catalog before proposing
-- [ ] Verifier debate (proposer/skeptic) replacing single-judge verifiers
-- [ ] Self-heal on extraction failure (adapt when a site changes)
-- [ ] Wire into cron (`sync-blogs` / new `sync-discover`), runner-instrumented
+- [x] Verifier debate (proposer/skeptic + **deterministic tie-break**) — blog-extraction verifier, live in `sync-blogs`; built reusably for museum/freshness
+- [ ] Adopt the debate in the museum + freshness verifiers
+- [ ] Link-following / source-discovery loop (deferred)
+- [ ] Cross-reference + dedup against live catalog before proposing (deferred)
+- [ ] Self-heal on extraction failure (adapt when a site changes) (deferred)
 
 ---
 
-## F5 — Longitudinal taste memory  ◻
+## F5 — Longitudinal taste memory  ◼ Shipped (localStorage)
 
 **Goal.** Build a persistent, explainable model of the couple's taste over time. This is
 the PRD's parked §4.6 "personalization learning."
@@ -261,12 +264,12 @@ DB persistence); privacy (taste model is sensitive — local-first or encrypted)
 explainability (must show *why* it inferred a preference).
 
 **Phases.**
-- [ ] Resolve `profiles` schema (singular → arrays) migration
-- [ ] Persistent taste store (memory tool or DB)
-- [ ] Inference loop from shortlist/plan history → preferences
-- [ ] Feed inferred preferences into `applyShortlistAffinity` input
-- [ ] "Why we inferred this" explainability surface
-- [ ] Privacy review (local-first vs encrypted server store)
+- [x] Persistent taste store — localStorage taste-event log (`gabo:taste-events-v1`)
+- [x] Inference loop from save history → **recency-weighted** preferences (60-day half-life)
+- [x] Feed inferred preferences into the plan profile (client enrich; complements `applyShortlistAffinity`)
+- [x] "Why we inferred this" explainability surface (the "Leaning…" hint)
+- [x] Privacy review — **local-first** chosen (history never leaves the device)
+- [ ] Resolve `profiles` schema (singular → arrays) + DB store (deferred — needs auth)
 
 ---
 

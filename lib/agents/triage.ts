@@ -21,22 +21,9 @@
 
 import { TRIAGE_MODEL } from '@/lib/agents/models'
 import { generateJson } from '@/lib/agents/runner'
+import { CUISINE_VOCAB, OVERRIDE_VOCAB, VIBE_VOCAB, filterToVocab } from '@/lib/agents/vocab'
 import { searchPlaces } from '@/lib/onemap/client'
-import type { LatLng, Profile, VibeTag } from '@/lib/planner/types'
-
-// Vocabulary the LLM is allowed to emit. Anything outside these sets is
-// filtered post-parse. Keep in sync with the form's chips so we don't
-// produce values the planner can't filter on.
-const CUISINE_VOCAB = [
-  'japanese', 'korean', 'chinese', 'thai', 'vietnamese', 'indian', 'malay',
-  'peranakan', 'italian', 'french', 'spanish', 'mediterranean', 'modern_european',
-  'middle_eastern', 'mexican', 'american', 'cafe', 'cocktail', 'brunch',
-  'dessert', 'bakery', 'seafood', 'omakase', 'pizza', 'bar',
-] as const
-
-const VIBE_VOCAB: readonly VibeTag[] = ['cozy', 'adventurous', 'celebratory', 'low_key']
-
-const OVERRIDE_VOCAB = ['vegetarian', 'no_alcohol', 'anniversary', 'birthday'] as const
+import type { LatLng, Profile } from '@/lib/planner/types'
 
 type TriageDraft = {
   start_a_query: string | null
@@ -125,11 +112,6 @@ function isDraft(x: unknown): x is TriageDraft {
     Array.isArray(o.override_tags) &&
     typeof o.notes === 'string'
   )
-}
-
-function filterToVocab<T extends readonly string[]>(values: string[], vocab: T): T[number][] {
-  const set = new Set<string>(vocab)
-  return [...new Set(values.filter((v): v is T[number] => set.has(v)))]
 }
 
 export async function runTriage(input: TriageInput): Promise<TriageResult> {

@@ -3,7 +3,7 @@ import { rerankBuckets } from '@/lib/agents/ranker'
 import { mapWithConcurrency } from '@/lib/async/pool'
 import { fetchDriveRoute, type DriveRouteResult } from '@/lib/onemap/client'
 import { evaluateCandidates } from '@/lib/planner/gemini-eval'
-import { isVenueOpenAt } from '@/lib/planner/hours'
+import { isVenueOpenForMeal } from '@/lib/planner/hours'
 import type { PlanRequest } from '@/lib/planner/request-validation'
 import {
   bucketByCategory,
@@ -117,11 +117,15 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
   let { ranked, cachedLegs } = routeResult
   let buckets = bucketByCategory(ranked)
 
-  // Phase 4 — agentic relaxation. When a bucket comes back thin, ask the
-  // LLM whether to widen the search by dropping SOFT constraints
-  // (cuisine avoidance, budget filter, distance cap, loved-cuisine boost).
-  // Hard filters never relax. Gated by AGENTIC_PLAN_ENABLED so the
-  // pre-Phase-4 behaviour is the default until we measure the new path.
+  // Search relaxation. Two layers when a bucket comes back thin:
+  //   - Deterministic pre-pass (always on): cheap toggle trials for budget
+  //     and cuisine-avoidance, the two soft constraints most commonly
+  //     responsible for nil/thin results.
+  //   - LLM agent (gated by AGENTIC_PLAN_ENABLED): only if the cheap path
+  //     can't help. Decides which of the four soft constraints to relax,
+  //     including the 60-min distance cap.
+  // Hard filters (open hours, dietary hardstops, weather × outdoor, run
+  // window) never relax.
   const relaxationMeta: {
     bucket: 'dining' | 'events'
     dropped: string[]
@@ -129,9 +133,8 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
     delta: number
   }[] = []
   if (
-    process.env.AGENTIC_PLAN_ENABLED === 'true' &&
-    (buckets.dining.length < MIN_HEALTHY_RESULTS ||
-      buckets.events.length < MIN_HEALTHY_RESULTS)
+    buckets.dining.length < MIN_HEALTHY_RESULTS ||
+    buckets.events.length < MIN_HEALTHY_RESULTS
   ) {
     const relaxedOutcome = await relaxAndRetry({
       venues,
@@ -295,19 +298,145 @@ type RelaxAndRetryDeps = {
   getDirection: (origin: LatLng, destination: LatLng) => Promise<DriveRouteResult>
 }
 
+type RelaxationToggles = {
+  drop_cuisine_avoidance: boolean
+  drop_budget_filter: boolean
+  drop_distance_cap: boolean
+  drop_match_boost: boolean
+}
+
+const NO_TOGGLES: RelaxationToggles = {
+  drop_cuisine_avoidance: false,
+  drop_budget_filter: false,
+  drop_distance_cap: false,
+  drop_match_boost: false,
+}
+
+// One widening pass: apply the toggles, re-filter, re-route, re-bucket, and
+// return the result only if a thin bucket actually grew. Shared by both the
+// deterministic pre-pass and the LLM agent path so the acceptance criteria
+// are identical.
+async function attemptWiden(
+  deps: RelaxAndRetryDeps,
+  toggles: RelaxationToggles
+): Promise<{
+  ranked: RankedVenue[]
+  buckets: Buckets
+  extraCachedLegs: number
+  diningGain: number
+  eventsGain: number
+} | null> {
+  const relaxedProfile: Profile = {
+    ...deps.profile,
+    cuisines_avoided: toggles.drop_cuisine_avoidance ? [] : deps.profile.cuisines_avoided,
+    budget_bands: toggles.drop_budget_filter ? [] : deps.profile.budget_bands,
+    cuisines_loved: toggles.drop_match_boost ? [] : deps.profile.cuisines_loved,
+  }
+  const relaxedCandidates = filterCandidates(
+    deps.venues,
+    relaxedProfile,
+    deps.request.override_tags,
+    deps.weather,
+    deps.scheduledDate
+  )
+  const relaxedTop = [...relaxedCandidates]
+    .sort((a, b) => prescore(b, relaxedProfile) - prescore(a, relaxedProfile))
+    .slice(0, ROUTING_CANDIDATE_CAP)
+  // No new prefilter survivors *and* distance cap not in play → nothing to
+  // gain. (The distance cap toggle can still help even if the prefilter
+  // didn't grow, since it changes what passes the post-routing 60-min cap.)
+  if (relaxedTop.length <= deps.candidates.length && !toggles.drop_distance_cap) return null
+
+  const route = await routeAndScore(
+    relaxedTop,
+    relaxedProfile,
+    deps.request.override_tags,
+    deps.startA,
+    deps.startB,
+    deps.getDirection
+  )
+  // bucketByCategory applies the 60-min ETA cap; drop_distance_cap means
+  // "raise that cap," handled via bucketWithoutEtaCap.
+  const widened = toggles.drop_distance_cap
+    ? bucketWithoutEtaCap(route.ranked)
+    : bucketByCategory(route.ranked)
+  const diningGain = widened.dining.length - deps.buckets.dining.length
+  const eventsGain = widened.events.length - deps.buckets.events.length
+  if (diningGain <= 0 && eventsGain <= 0) return null
+  return {
+    ranked: route.ranked,
+    buckets: widened,
+    extraCachedLegs: route.cachedLegs,
+    diningGain,
+    eventsGain,
+  }
+}
+
 async function relaxAndRetry(deps: RelaxAndRetryDeps): Promise<{
   ranked: RankedVenue[]
   buckets: Buckets
   extraCachedLegs: number
   relaxationMeta: { bucket: 'dining' | 'events'; dropped: string[]; reason: string; delta: number }[]
 } | null> {
-  // Ask the agent — once per thin bucket. We ask each bucket separately so
-  // dining can relax cuisine while events relaxes distance, say.
   const thin: ('dining' | 'events')[] = []
   if (deps.buckets.dining.length < MIN_HEALTHY_RESULTS) thin.push('dining')
   if (deps.buckets.events.length < MIN_HEALTHY_RESULTS) thin.push('events')
   if (thin.length === 0) return null
 
+  // Deterministic pre-pass — try the cheapest soft widenings before paying
+  // for an LLM call. This also rescues the case where decideRelaxation
+  // bails out at prefilter_total < 10: exactly the slot where one tight
+  // constraint (budget, avoid-list) is the actual culprit, and a no-LLM
+  // toggle would fix it.
+  const deterministic: Array<{
+    toggles: Partial<RelaxationToggles>
+    dropped: string[]
+    reason: string
+  }> = []
+  if (deps.profile.budget_bands.length > 0) {
+    deterministic.push({
+      toggles: { drop_budget_filter: true },
+      dropped: ['budget_filter'],
+      reason: 'Widened past your budget',
+    })
+  }
+  if (deps.profile.cuisines_avoided.length > 0) {
+    deterministic.push({
+      toggles: { drop_cuisine_avoidance: true },
+      dropped: ['cuisine_avoidance'],
+      reason: 'Included cuisines you usually skip',
+    })
+  }
+  if (deps.profile.budget_bands.length > 0 && deps.profile.cuisines_avoided.length > 0) {
+    deterministic.push({
+      toggles: { drop_budget_filter: true, drop_cuisine_avoidance: true },
+      dropped: ['budget_filter', 'cuisine_avoidance'],
+      reason: 'Widened past your budget and avoid list',
+    })
+  }
+  for (const attempt of deterministic) {
+    const out = await attemptWiden(deps, { ...NO_TOGGLES, ...attempt.toggles })
+    if (!out) continue
+    return {
+      ranked: out.ranked,
+      buckets: out.buckets,
+      extraCachedLegs: out.extraCachedLegs,
+      relaxationMeta: thin
+        .map((bucket) => ({
+          bucket,
+          dropped: attempt.dropped,
+          reason: attempt.reason,
+          delta: bucket === 'dining' ? out.diningGain : out.eventsGain,
+        }))
+        .filter((m) => m.delta > 0),
+    }
+  }
+
+  // LLM relaxation agent — runs only when no cheap deterministic widening
+  // helped, AND the env flag is on. Per-bucket asks so dining can relax
+  // cuisine while events relaxes distance, etc. decideRelaxation enforces
+  // its own prefilter floor before issuing the model call.
+  if (process.env.AGENTIC_PLAN_ENABLED !== 'true') return null
   const decisions = await Promise.all(
     thin.map(async (bucket) => ({
       bucket,
@@ -322,18 +451,14 @@ async function relaxAndRetry(deps: RelaxAndRetryDeps): Promise<{
     }))
   )
 
-  // Union the toggled flags across all thin buckets — one widened pass
-  // handles both. (If dining wants cuisine_avoidance dropped and events
-  // wants distance_cap dropped, we drop both; each bucket gets its own
-  // metadata note explaining what was widened for it.)
-  const union = decisions.reduce(
+  const union = decisions.reduce<RelaxationToggles>(
     (acc, { decision }) => ({
       drop_cuisine_avoidance: acc.drop_cuisine_avoidance || decision.drop_cuisine_avoidance,
       drop_budget_filter: acc.drop_budget_filter || decision.drop_budget_filter,
       drop_distance_cap: acc.drop_distance_cap || decision.drop_distance_cap,
       drop_match_boost: acc.drop_match_boost || decision.drop_match_boost,
     }),
-    { drop_cuisine_avoidance: false, drop_budget_filter: false, drop_distance_cap: false, drop_match_boost: false }
+    NO_TOGGLES
   )
   const anyToggled =
     union.drop_cuisine_avoidance ||
@@ -342,51 +467,8 @@ async function relaxAndRetry(deps: RelaxAndRetryDeps): Promise<{
     union.drop_match_boost
   if (!anyToggled) return null
 
-  // Build a relaxed profile + override set.
-  const relaxedProfile: Profile = {
-    ...deps.profile,
-    cuisines_avoided: union.drop_cuisine_avoidance ? [] : deps.profile.cuisines_avoided,
-    budget_bands: union.drop_budget_filter ? [] : deps.profile.budget_bands,
-    cuisines_loved: union.drop_match_boost ? [] : deps.profile.cuisines_loved,
-  }
-
-  const relaxedCandidates = filterCandidates(
-    deps.venues,
-    relaxedProfile,
-    deps.request.override_tags,
-    deps.weather,
-    deps.scheduledDate
-  )
-  const relaxedTop = [...relaxedCandidates]
-    .sort((a, b) => prescore(b, relaxedProfile) - prescore(a, relaxedProfile))
-    .slice(0, ROUTING_CANDIDATE_CAP)
-
-  if (relaxedTop.length <= deps.candidates.length) {
-    // No new prefilter survivors → nothing to gain.
-    return null
-  }
-
-  const relaxedRoute = await routeAndScore(
-    relaxedTop,
-    relaxedProfile,
-    deps.request.override_tags,
-    deps.startA,
-    deps.startB,
-    deps.getDirection
-  )
-
-  // bucketByCategory applies the 60-min ETA cap. The relaxation toggle
-  // drop_distance_cap means "raise that cap" — implement by widening the
-  // post-bucket pool to include over-60-min cards when the toggle fires.
-  // We do this by short-circuiting bucketByCategory with our own pool.
-  const widenedBuckets = union.drop_distance_cap
-    ? bucketWithoutEtaCap(relaxedRoute.ranked)
-    : bucketByCategory(relaxedRoute.ranked)
-
-  // Only accept the relaxed pass if at least one bucket actually grew.
-  const diningGain = widenedBuckets.dining.length - deps.buckets.dining.length
-  const eventsGain = widenedBuckets.events.length - deps.buckets.events.length
-  if (diningGain <= 0 && eventsGain <= 0) return null
+  const out = await attemptWiden(deps, union)
+  if (!out) return null
 
   const relaxationMeta = decisions
     .map(({ bucket, decision }) => {
@@ -395,15 +477,15 @@ async function relaxAndRetry(deps: RelaxAndRetryDeps): Promise<{
       if (decision.drop_budget_filter) dropped.push('budget_filter')
       if (decision.drop_distance_cap) dropped.push('distance_cap')
       if (decision.drop_match_boost) dropped.push('match_boost')
-      const delta = bucket === 'dining' ? diningGain : eventsGain
+      const delta = bucket === 'dining' ? out.diningGain : out.eventsGain
       return { bucket, dropped, reason: decision.reason, delta }
     })
     .filter((m) => m.dropped.length > 0 && m.delta > 0)
 
   return {
-    ranked: relaxedRoute.ranked,
-    buckets: widenedBuckets,
-    extraCachedLegs: relaxedRoute.cachedLegs,
+    ranked: out.ranked,
+    buckets: out.buckets,
+    extraCachedLegs: out.extraCachedLegs,
     relaxationMeta,
   }
 }
@@ -438,9 +520,10 @@ async function loadVenuesWithFallback(profile: Profile, overrides: string[]): Pr
 async function loadFromSupabase(profile: Profile, overrides: string[]): Promise<Venue[]> {
   const supabase = await createClient()
   let query = supabase.from('venues').select('*').eq('active', true)
-  if (profile.budget_bands && profile.budget_bands.length > 0) {
-    query = query.in('budget_band', profile.budget_bands)
-  }
+  // Budget filter runs in-memory in filterInMemory() below — keeping it out
+  // of the DB query lets the relaxation agent's `drop_budget_filter` actually
+  // widen the pool (the agent can't see rows it never loaded), and preserves
+  // the experience-row carve-out the in-memory filter already encodes.
   if (profile.dietary_hardstops.length > 0) {
     query = query.contains('dietary_flags', profile.dietary_hardstops)
   }
@@ -466,7 +549,7 @@ function filterCandidates(
   return filterInMemory(venues, profile, overrides).filter((venue) => {
     if (venue.cuisine_tags.some((c) => avoided.has(c))) return false
     if (weather.condition === 'rain' && venue.is_outdoor) return false
-    if (!isVenueOpenAt(venue, scheduledDate)) return false
+    if (!isVenueOpenForMeal(venue, scheduledDate)) return false
     if (!isInRunWindow(venue, scheduledDate)) return false
     return true
   })

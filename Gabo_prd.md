@@ -99,9 +99,9 @@ The legacy 53-venue hand-seeded catalog has been retired. The catalog now grows 
 
 ## 3.2 What's LLM-driven vs rules-based
 
-Gabo is a **deterministic planner with LLM help at the seams**, not an agentic system despite the `lib/agents/` folder name. The user-visible decision — *which* venues appear and *in what order* — is pure rules-based code; no LLM scores or ranks venues in the default configuration. Every LLM call is **Gemini** (no Claude/Anthropic in the runtime) and **every one is single-shot** — none plan, loop, or chain tool calls. The model tier per task is centralised in `lib/agents/models.ts` (extraction → `gemini-2.5-flash`; verify / copy / triage / rank → `gemini-2.5-flash-lite`); every call is wrapped by `lib/agents/runner.ts` for observability (`/admin/agents`).
+Gabo is a **deterministic planner with LLM help at the seams**, not an agentic system despite the `lib/agents/` folder name. The user-visible decision — *which* venues appear and *in what order* — is pure rules-based code; no LLM scores or ranks venues in the default configuration. Every LLM call is **Gemini** (no Claude/Anthropic in the runtime). The model tier per task is centralised in `lib/agents/models.ts` (extraction → `gemini-2.5-flash`; verify / copy / triage / rank / orchestration → `gemini-2.5-flash-lite` / `flash`); every call is wrapped by `lib/agents/runner.ts` for observability (`/admin/agents`).
 
-There are **9 LLM touchpoints + a triage step**. The only ones that reach outside their prompt use Gemini **with Google Search grounding** (museum discovery + the verifiers) and run exclusively in cron ingestion — never on a user's plan request.
+The **base app** has **9 LLM touchpoints + a triage step**, all single-shot. The only ones that reach outside their prompt use Gemini **with Google Search grounding** (museum discovery + the verifiers) and run exclusively in cron ingestion — never on a user's plan request. The flag-gated **agentic features (F1–F5)** add the first looping/multi-call touchpoints (a bounded tool-use loop in F1, a 2-call debate in F4); they ship **dark** and still keep every user-visible decision in deterministic code (see the F-series table below).
 
 **Cron ingestion — LLM-driven (off the request path):**
 
@@ -124,6 +124,18 @@ There are **9 LLM touchpoints + a triage step**. The only ones that reach outsid
 | **Relaxation** | flash-lite | Suggests which soft constraints to drop on thin buckets (`lib/agents/relaxation.ts`) | **Gated by `AGENTIC_PLAN_ENABLED`**; only after a *deterministic* widening pre-pass (`attemptWiden`) fails |
 | **Tolerance-band ranker** | flash-lite | Suggests a reorder within a bucket (`lib/agents/ranker.ts`) | **Gated by `AGENTIC_RANKER_ENABLED`**; LLM only *suggests* — deterministic clamp (±3 positions, #1 can't fall below #3) decides |
 | **Per-venue reasoning copy** | flash-lite | Generates the "why this fits you" line per card from profile + venue signals (`lib/planner/gemini-eval.ts`) | Always on for top ~10 cards; 8s timeout + empty-map fallback, non-blocking |
+
+**Agentic features (F1–F5) — flag-gated, ship dark:**
+
+Each keeps the user-visible decision (scoring, feasibility, keep/drop, action tiers) in deterministic code; the LLM is confined to interpretation, argument, or prose. See [AGENTIC_ROADMAP.md](AGENTIC_ROADMAP.md) for status + follow-ups and [ARCHITECTURE.md](ARCHITECTURE.md) for the decision rationale.
+
+| Feature | LLM? | Mechanism | Flag |
+|---|---|---|---|
+| **F1 · Conversational refine** | flash, **bounded tool-use loop** | Per-request `/api/plan/refine`; interprets a plain-language correction into a *validated `PlanRequest` patch*, then `planDate()` re-runs. Agent changes inputs, never outputs (`lib/agents/conversation.ts`) | `AGENTIC_CHAT_ENABLED` + `NEXT_PUBLIC_…` |
+| **F2 · Evening itinerary** | flash-lite, single-shot | On-demand `/api/plan/itinerary`; **feasibility (timing/reachability) is deterministic**, the LLM only picks the best feasible evening + writes the pacing line (`lib/planner/itinerary.ts`) | `AGENTIC_ITINERARY_ENABLED` + `NEXT_PUBLIC_…` |
+| **F4 · Verifier debate** | flash-lite, **2-call debate** | Cron blog-extraction; proposer + skeptic, then a **pure deterministic tie-break** decides keep/flag/drop (`runner.ts#resolveDebate`) | `AGENTIC_VERIFIER_DEBATE` |
+| **F3 · Booking concierge** | **none** (deterministic) | Client gate; tier-classifies actions (irreversible/reversible/outward), confirms the real payload, opens the real provider page — never fabricates a booking (`lib/booking/*`, `BookingOverlay`) | `NEXT_PUBLIC_AGENTIC_BOOKING_ENABLED` |
+| **F5 · Taste memory** | **none** (deterministic) | Client; recency-weighted affinity over the local save history enriches the plan profile (reuses `matchScore`); explainable "Leaning…" hint (`lib/taste-memory.ts`) | `NEXT_PUBLIC_AGENTIC_TASTE_ENABLED` |
 
 **Deterministic (the user-visible decisions):**
 
