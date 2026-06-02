@@ -108,6 +108,7 @@ Recently shipped:
 Partner-facing app, account sharing, push notifications, payment, rescheduling, magic-link auth (deferred — localStorage profile works for demo).
 
 ## Known follow-ups
+- **Agentic roadmap** — next-gen agentic features (conversational planner, itinerary composition, HITL booking concierge, self-healing catalog, taste memory) are designed + tracked in [AGENTIC_ROADMAP.md](AGENTIC_ROADMAP.md). Living build-tracker; promote shipped behaviour into the PRD.
 - Restore the Google Places + Foursquare API access (user-side fixes per PRD §6.4) so the dining catalog scales beyond the blog-scanner stopgap.
 - Schema alignment: `profiles` table still has singular `vibe_default` + `budget_band`; code uses arrays. Migration needed if we persist to DB (currently localStorage only).
 - **SG public-holiday calendar** in `lib/planner/sg-public-holidays.ts` covers 2026 in full (including lunar / Islamic dates and gazetted in-lieu Mondays); 2027 has fixed-date holidays only because MOM hasn't published 2027 yet. Re-pull from https://www.mom.gov.sg/employment-practices/public-holidays annually and append the new year's dates. Missing dates fall back to weekday hours (safe failure mode).
