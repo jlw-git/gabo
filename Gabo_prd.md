@@ -99,22 +99,43 @@ The legacy 53-venue hand-seeded catalog has been retired. The catalog now grows 
 
 ## 3.2 What's LLM-driven vs rules-based
 
-Gabo is **AI-driven** in three load-bearing places, all powered by **Gemini 2.5 Flash**. Everything else — the parts that need to be predictable, fast, and debuggable — is deterministic code.
+Gabo is a **deterministic planner with LLM help at the seams**, not an agentic system despite the `lib/agents/` folder name. The user-visible decision — *which* venues appear and *in what order* — is pure rules-based code; no LLM scores or ranks venues in the default configuration. Every LLM call is **Gemini** (no Claude/Anthropic in the runtime) and **every one is single-shot** — none plan, loop, or chain tool calls. The model tier per task is centralised in `lib/agents/models.ts` (extraction → `gemini-2.5-flash`; verify / copy / triage / rank → `gemini-2.5-flash-lite`); every call is wrapped by `lib/agents/runner.ts` for observability (`/admin/agents`).
+
+There are **9 LLM touchpoints + a triage step**. The only ones that reach outside their prompt use Gemini **with Google Search grounding** (museum discovery + the verifiers) and run exclusively in cron ingestion — never on a user's plan request.
+
+**Cron ingestion — LLM-driven (off the request path):**
+
+| Touchpoint | Model | Mechanism | Why LLM |
+|---|---|---|---|
+| **Catalog ingestion (dining)** | flash | Extracts structured venue records from food-blog prose: name, address, cuisine/vibe tags, opening/closing dates, award labels, reservation policy, photo selection (`lib/sources/blog-scanner.ts#extractVenues`) | Articles vary wildly in shape (single review vs roundup vs award write-up) |
+| **Catalog ingestion (experiences)** | flash | Same scanner, separate prompt extracts pop-ups, indie shops, festivals with run windows (`lib/sources/blog-scanner.ts#extractExperiences`) | Same |
+| **Hours extraction (blog venues)** | flash | Optionally returns parsed weekly hours from article body; stamps `badge_meta.hours_source='extracted'`, else cuisine-typed defaults | Hours stated in free prose ("Tues–Sun, 6pm till late") |
+| **Blog-extraction verifier** | flash-lite | Single-shot judge over each extracted row: pass / soft-flag / hard-reject (`lib/agents/verifiers/blog-extraction.ts`) | Catch hallucinated or malformed extractions before they enter the catalog |
+| **Museum / exhibition discovery** | flash **+ Search** | Grounded search finds current/upcoming exhibitions across NHB / ArtScience / Gardens (`lib/sources/museum-agent.ts`) | Open-ended discovery problem with no clean API |
+| **Museum-extraction verifier** | flash-lite (+Search) | Grounded single-shot judge over discovered exhibitions (`lib/agents/verifiers/museum-extraction.ts`) | Confirm the exhibition is real and current |
+| **Freshness verifier** | flash-lite **+ Search** | Grounded re-check of up to 50 trending venues/run; writes `active=false` / badge annotations to Supabase (`lib/agents/verifiers/freshness.ts`) | Catch closed venues / ended runs that the catalog still lists |
+| **TSL event extraction** | flash | Single-shot extraction on the TSL Things-to-Do source only (`lib/sources/events-sync.ts`) | Unstructured RSS prose |
+
+**Per-request (`/api/plan`) — mostly deterministic, LLM at the edges:**
+
+| Touchpoint | Model | Mechanism | Notes |
+|---|---|---|---|
+| **Triage** | flash-lite | Single-shot intent parse + parallel OneMap place resolution (`lib/agents/triage.ts`, via `/api/plan/triage`) | Only fires when the user typed freeform text (≥4 chars); slot-fills the plan request, doesn't plan |
+| **Relaxation** | flash-lite | Suggests which soft constraints to drop on thin buckets (`lib/agents/relaxation.ts`) | **Gated by `AGENTIC_PLAN_ENABLED`**; only after a *deterministic* widening pre-pass (`attemptWiden`) fails |
+| **Tolerance-band ranker** | flash-lite | Suggests a reorder within a bucket (`lib/agents/ranker.ts`) | **Gated by `AGENTIC_RANKER_ENABLED`**; LLM only *suggests* — deterministic clamp (±3 positions, #1 can't fall below #3) decides |
+| **Per-venue reasoning copy** | flash-lite | Generates the "why this fits you" line per card from profile + venue signals (`lib/planner/gemini-eval.ts`) | Always on for top ~10 cards; 8s timeout + empty-map fallback, non-blocking |
+
+**Deterministic (the user-visible decisions):**
 
 | Layer | Mechanism | Why |
 |---|---|---|
-| **Catalog ingestion (dining)** | Gemini extracts structured venue records from food-blog prose: name, address, cuisine/vibe tags, opening/closing dates, award labels, reservation policy, photo selection (`lib/sources/blog-scanner.ts#extractVenues`) | Natural-language understanding — articles vary wildly in shape (single review vs roundup vs award write-up) |
-| **Catalog ingestion (experiences)** | Same scanner, separate Gemini prompt extracts pop-ups, indie shops, festivals with run windows (`lib/sources/blog-scanner.ts#extractExperiences`) | Same |
-| **Hours extraction (blog-sourced venues)** | Gemini optionally returns parsed weekly hours from the article body; planner stamps `badge_meta.hours_source='extracted'` and falls back to cuisine-typed defaults otherwise | Articles state hours in free prose ("Tues–Sun, 6pm till late") that rules-based parsing handles poorly |
-| **Museum / exhibition discovery** | Gemini-grounded search agent finds current/upcoming exhibitions across NHB / ArtScience / Gardens (`lib/sources/museum-agent.ts`) | Open-ended discovery problem with no clean API |
-| **Per-venue reasoning copy** | Gemini generates the "why this fits you" line on each card from profile + venue signals (`lib/planner/gemini-eval.ts`) | NL generation tailored per user; would be brittle as a template engine |
-| Hard filters (open at time, dietary, weather, budget, run window) | Deterministic code in `lib/planner/plan-date.ts#filterCandidates` and `lib/planner/hours.ts` | Must be predictable; user can audit why a venue dropped out |
-| Fairness, match, freshness, friction scoring | Deterministic math in `lib/planner/score.ts` | Must be debuggable, fast, and stable across runs |
+| Hard filters (open at time, dietary, weather, budget, run window) | `lib/planner/plan-date.ts#filterCandidates` + `lib/planner/hours.ts` | Must be predictable; user can audit why a venue dropped out |
+| Fairness, match, freshness, friction scoring | `lib/planner/score.ts` | Must be debuggable, fast, stable across runs |
 | Card bucketing (Dining / Events) + filter-chip predicates | Pure functions on row metadata | Same |
 | Trending score (Reddit + shortlist velocity) | Statistical hybrid weight in `lib/trending/refresh.ts` | Statistical aggregation, not understanding |
 | Routing + ETAs | OneMap drive / public-transit APIs | Already correct; no LLM value-add |
 
-Rule of thumb: **LLM where the input is unstructured prose or the output is human-facing copy; rules where the input is structured data and the output is a user-visible decision.**
+Rule of thumb: **LLM where the input is unstructured prose or the output is human-facing copy; rules where the input is structured data and the output is a user-visible decision.** Even the flagged "agentic" relaxation/ranker steps keep the final, user-visible call in deterministic code.
 
 ---
 
