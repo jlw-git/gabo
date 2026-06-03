@@ -207,7 +207,10 @@ export async function runConversationTurn(
     prompt: buildPrompt(input, summarizeBuckets(last.buckets)),
     tools,
     maxRounds: 3,
-    timeoutMs: 18_000,
+    // Generous budget: the orchestration model (Kimi K2.6 via OpenRouter) is
+    // slower than flash, and each apply_changes tool call re-runs planDate
+    // (Supabase + OneMap) inside the loop. 18s timed out in practice (~21s real).
+    timeoutMs: 40_000,
   })
 
   // End-of-loop sync: if a tool mutated the request after the last re-plan

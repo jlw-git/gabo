@@ -27,13 +27,16 @@ export const TRIAGE_MODEL = 'gemini-2.5-flash-lite'
 export const RANKER_MODEL = 'gemini-2.5-flash-lite'
 
 // Orchestration model for the conversational planner (F1) — the agentic/tool-
-// calling path. Kimi K2.6 is the standout for tool-calling, run via OpenRouter.
-// NOTE: this is an OpenRouter-only slug, so F1 now REQUIRES OPENROUTER_API_KEY;
-// without it the refine loop degrades gracefully (returns "couldn't adjust").
-export const ORCHESTRATION_MODEL = 'moonshotai/kimi-k2.6'
+// calling path. DeepSeek V4 Pro, run via OpenRouter. A head-to-head on real
+// refine inputs picked it over Kimi K2.6: equal-or-better tool-arg quality AND
+// ~3-7s vs K2.6's ~8-40s (K2.6 timed out entirely on "fancier, anniversary").
+// Kimi K2.6 is high-quality but too slow/variable for a synchronous refine.
+// NOTE: OpenRouter-only slug — F1 REQUIRES OPENROUTER_API_KEY; without it the
+// refine loop degrades gracefully (returns "couldn't adjust").
+export const ORCHESTRATION_MODEL = 'deepseek/deepseek-v4-pro'
 
 // Automatic fallback for OpenRouter calls (resilience when the primary model is
-// unavailable / rate-limited). Applied via OpenRouter's `models` array, so e.g.
-// the Kimi orchestration call fails over to DeepSeek V4 without extra code.
-// Empty string disables the fallback. ('deepseek/deepseek-v4-flash' for cheaper.)
-export const OPENROUTER_FALLBACK_MODEL = 'deepseek/deepseek-v4-pro'
+// unavailable / rate-limited). Applied via OpenRouter's `models` array, so a
+// primary outage fails over with no extra code. Flash = fast + cheap backup.
+// Empty string disables the fallback.
+export const OPENROUTER_FALLBACK_MODEL = 'deepseek/deepseek-v4-flash'
