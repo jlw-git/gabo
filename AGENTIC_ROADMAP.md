@@ -235,9 +235,9 @@ only, never per-request); junk-source guard. Cron-side, so no user latency.
 
 **Phases.**
 - [x] Verifier debate (proposer/skeptic + **deterministic tie-break**) — blog-extraction verifier, live in `sync-blogs`; built reusably for museum/freshness
-- [ ] Adopt the debate in the museum + freshness verifiers
-- [ ] Link-following / source-discovery loop (deferred)
-- [ ] Cross-reference + dedup against live catalog before proposing (deferred)
+- [x] Adopt the debate in the **museum + freshness** verifiers (grounded; one `AGENTIC_VERIFIER_DEBATE` flag governs all three)
+- [x] Autonomous **source discovery** — grounded agent proposes novel SG sources, deterministically de-duped + reachability-gated, recorded for review (`/api/admin/discover-sources`); never auto-ingests
+- [ ] Write-time cross-blog dedup (deferred — needs a `critic_pick` redesign; read-time dedup already covers the user)
 - [ ] Self-heal on extraction failure (adapt when a site changes) (deferred)
 
 ---

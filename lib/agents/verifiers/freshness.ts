@@ -15,7 +15,7 @@
 // quota — at $0.0001/call this is ~$0.005/run.
 
 import { VERIFIER_MODEL } from '@/lib/agents/models'
-import { verify, type Verdict } from '@/lib/agents/runner'
+import { debateVerdict, verify, type Verdict } from '@/lib/agents/runner'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 
 const MAX_VENUES_PER_RUN = 50
@@ -39,25 +39,69 @@ export type FreshnessSummary = {
   errors: string[]
 }
 
-async function checkOne(row: FreshnessRow): Promise<Verdict> {
-  const prompt = `You are verifying that a Singapore venue is still operating today.
-
-Venue:
+function evidence(row: FreshnessRow): string {
+  return `Venue:
 - name: ${row.name}
 - address: ${row.address}
-${row.source_url ? `- last-known source URL: ${row.source_url}` : ''}
+${row.source_url ? `- last-known source URL: ${row.source_url}` : ''}`
+}
+
+const VERDICT_JSON =
+  'Return ONLY raw JSON:\n{ "verdict": "pass" | "soft_flag" | "hard_reject", "confidence": <0..1>, "reason": "<≤200 chars>" }'
+
+function judgePrompt(row: FreshnessRow): string {
+  return `You are verifying that a Singapore venue is still operating today.
+
+${evidence(row)}
 
 Search the web for the most recent signals on this venue. Decide:
 - "pass": there's clear recent evidence (news, reviews, social posts in the last few months) that the venue is open and operating normally.
 - "soft_flag": signals are mixed or sparse — possibly slow business, possibly out of date, but no clear closure. Confidence 0.4–0.7.
 - "hard_reject": you find clear evidence the venue has permanently closed, moved, or rebranded. Confidence ≥ 0.8.
 
-Return ONLY raw JSON:
-{ "verdict": "pass" | "soft_flag" | "hard_reject", "confidence": <0..1>, "reason": "<≤200 chars>" }`
+${VERDICT_JSON}`
+}
 
+// Debate roles — same grounded search, opposed stances.
+function proposerPrompt(row: FreshnessRow): string {
+  return `You are DEFENDING that a Singapore venue is still open and operating. Search the web for evidence it's alive — recent reviews, social posts, an active listing, current hours.
+
+${evidence(row)}
+
+- "pass": you find recent evidence it's operating normally.
+- "soft_flag": you can defend it but the signals are thin.
+- "hard_reject": only if, searching in good faith, you find clear evidence it has permanently closed, moved, or rebranded.
+
+${VERDICT_JSON}`
+}
+
+function skepticPrompt(row: FreshnessRow): string {
+  return `You are a SKEPTIC checking whether a Singapore venue has CLOSED, moved, or rebranded. Search the web for closure signals — "permanently closed", closure news, removed/relocated listings, no recent activity.
+
+${evidence(row)}
+
+- "hard_reject" (confidence ≥ 0.8): clear evidence of permanent closure, relocation, or rebrand.
+- "soft_flag": suspicious — stale or sparse signals — but no proof of closure.
+- "pass": only if you find clear evidence it's still operating.
+Default to hard_reject when the evidence strongly suggests it's gone.
+
+${VERDICT_JSON}`
+}
+
+async function checkOne(row: FreshnessRow): Promise<Verdict> {
+  // Debate mode (F4): grounded proposer + skeptic + deterministic tie-break.
+  if (process.env.AGENTIC_VERIFIER_DEBATE === 'true') {
+    return debateVerdict({
+      proposerPrompt: proposerPrompt(row),
+      skepticPrompt: skepticPrompt(row),
+      model: VERIFIER_MODEL,
+      timeoutMs: 25_000,
+      groundWithSearch: true,
+    })
+  }
   return verify({
     model: VERIFIER_MODEL,
-    prompt,
+    prompt: judgePrompt(row),
     timeoutMs: 10_000,
     groundWithSearch: true,
   })

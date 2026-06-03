@@ -154,7 +154,7 @@ async function searchExhibitions(museum: MuseumConfig): Promise<RawExhibition[]>
     await chatComplete({
       model: EXTRACTION_MODEL,
       grounded: true, // Google Search grounding — pinned to Gemini-direct
-      timeoutMs: 30_000,
+      timeoutMs: 60_000, // grounded web search is slow + variable (was unbounded pre-provider)
       prompt: `Search for current and upcoming exhibitions at ${museum.name} in Singapore.
 Today is ${today}. Only include exhibitions running now or opening within the next 6 months.
 Return ONLY a raw JSON array with no markdown, no explanation. Each item must have:

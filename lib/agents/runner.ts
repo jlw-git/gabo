@@ -170,6 +170,9 @@ export type DebateOptions = {
   skepticPrompt: string
   model: string
   timeoutMs?: number
+  // When true, both proposer + skeptic run with Google Search grounding
+  // (museum + freshness verifiers need this).
+  groundWithSearch?: boolean
 }
 
 // Run proposer + skeptic in parallel, then resolve deterministically. Each side
@@ -177,8 +180,18 @@ export type DebateOptions = {
 // single-judge graceful-degrade contract.
 export async function debateVerdict(opts: DebateOptions): Promise<Verdict> {
   const [proposer, skeptic] = await Promise.all([
-    verify({ model: opts.model, prompt: opts.proposerPrompt, timeoutMs: opts.timeoutMs }),
-    verify({ model: opts.model, prompt: opts.skepticPrompt, timeoutMs: opts.timeoutMs }),
+    verify({
+      model: opts.model,
+      prompt: opts.proposerPrompt,
+      timeoutMs: opts.timeoutMs,
+      groundWithSearch: opts.groundWithSearch,
+    }),
+    verify({
+      model: opts.model,
+      prompt: opts.skepticPrompt,
+      timeoutMs: opts.timeoutMs,
+      groundWithSearch: opts.groundWithSearch,
+    }),
   ])
   return resolveDebate(proposer, skeptic)
 }
