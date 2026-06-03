@@ -22,7 +22,7 @@
 // Requires: GOOGLE_GEMINI_API_KEY (free at aistudio.google.com)
 
 import * as cheerio from 'cheerio'
-import { GoogleGenAI } from '@google/genai'
+import { chatComplete } from '@/lib/agents/provider'
 import { EXTRACTION_MODEL } from '@/lib/agents/models'
 import { verifyBlogExtraction } from '@/lib/agents/verifiers/blog-extraction'
 import { mapWithConcurrency } from '@/lib/async/pool'
@@ -351,12 +351,6 @@ function buildDefaultHoursJson(cuisineTags: string[]) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function geminiClient(): GoogleGenAI {
-  const key = process.env.GOOGLE_GEMINI_API_KEY
-  if (!key) throw new Error('GOOGLE_GEMINI_API_KEY missing')
-  return new GoogleGenAI({ apiKey: key })
-}
-
 function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -518,7 +512,6 @@ async function extractVenues(
   articlePhotoUrl: string | null,
   articleImageUrls: string[]
 ): Promise<ExtractedVenue[]> {
-  const ai = geminiClient()
 
   const imageList =
     articleImageUrls.length > 0
@@ -570,12 +563,7 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
   { "name": "...", "address": "...", "cuisine_tags": [...], "vibe_tags": [...], "opens_at": null, "ends_at": null, "photo_url": null, "is_new_opening": false, "is_limited_run": false, "is_award_winner": false, "award_name": null, "accepts_reservations": null, "alcohol_free": null, "hours": null }
 ]`
 
-  const result = await ai.models.generateContent({
-    model: EXTRACTION_MODEL,
-    contents: prompt,
-  })
-
-  const raw = (result.text ?? '').trim()
+  const raw = (await chatComplete({ model: EXTRACTION_MODEL, prompt })).trim()
   if (!raw) return []
 
   // Tolerate fenced code blocks, leading/trailing prose
@@ -717,7 +705,6 @@ async function extractExperiences(
   articlePhotoUrl: string | null,
   articleImageUrls: string[]
 ): Promise<ExtractedExperience[]> {
-  const ai = geminiClient()
 
   const imageList =
     articleImageUrls.length > 0
@@ -758,12 +745,7 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
   { "name": "...", "address": "...", "experience_tags": [...], "vibe_tags": [...], "starts_at": null, "ends_at": null, "opens_at": null, "photo_url": null, "is_new_opening": false, "is_limited_run": false, "is_outdoor": false }
 ]`
 
-  const result = await ai.models.generateContent({
-    model: EXTRACTION_MODEL,
-    contents: prompt,
-  })
-
-  const raw = (result.text ?? '').trim()
+  const raw = (await chatComplete({ model: EXTRACTION_MODEL, prompt })).trim()
   if (!raw) return []
 
   const jsonMatch = raw.match(/\[[\s\S]*\]/)

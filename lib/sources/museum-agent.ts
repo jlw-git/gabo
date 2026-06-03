@@ -13,18 +13,13 @@
 // Requires: GOOGLE_GEMINI_API_KEY (free at aistudio.google.com, separate from
 // the Maps Platform GOOGLE_PLACES_API_KEY)
 
-import { GoogleGenAI } from '@google/genai'
+import { chatComplete } from '@/lib/agents/provider'
 import { EXTRACTION_MODEL } from '@/lib/agents/models'
 import { verifyMuseumExhibition } from '@/lib/agents/verifiers/museum-extraction'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 import type { HoursJson } from '@/lib/planner/types'
 import { editorialEventToVenue, type EditorialEvent } from './editorial-events'
 
-function geminiClient(): GoogleGenAI {
-  const key = process.env.GOOGLE_GEMINI_API_KEY
-  if (!key) throw new Error('GOOGLE_GEMINI_API_KEY missing')
-  return new GoogleGenAI({ apiKey: key })
-}
 
 type MuseumConfig = {
   source_prefix: string
@@ -154,11 +149,13 @@ function isRawExhibition(x: unknown): x is RawExhibition {
 
 async function searchExhibitions(museum: MuseumConfig): Promise<RawExhibition[]> {
   const today = new Date().toISOString().slice(0, 10)
-  const ai = geminiClient()
 
-  const result = await ai.models.generateContent({
-    model: EXTRACTION_MODEL,
-    contents: `Search for current and upcoming exhibitions at ${museum.name} in Singapore.
+  const text = (
+    await chatComplete({
+      model: EXTRACTION_MODEL,
+      grounded: true, // Google Search grounding — pinned to Gemini-direct
+      timeoutMs: 30_000,
+      prompt: `Search for current and upcoming exhibitions at ${museum.name} in Singapore.
 Today is ${today}. Only include exhibitions running now or opening within the next 6 months.
 Return ONLY a raw JSON array with no markdown, no explanation. Each item must have:
 - name: exhibition title
@@ -167,12 +164,8 @@ Return ONLY a raw JSON array with no markdown, no explanation. Each item must ha
 - source_url: official page URL for this specific exhibition
 - photo_url: image URL or null
 Search query: ${museum.search_query}`,
-    config: {
-      tools: [{ googleSearch: {} }],
-    },
-  })
-
-  const text = (result.text ?? '').trim()
+    })
+  ).trim()
   const jsonMatch = text.match(/\[[\s\S]*\]/)
   if (!jsonMatch) return []
 

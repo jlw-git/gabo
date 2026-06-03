@@ -10,7 +10,7 @@
 //   - Graceful fallback: caller continues with formula copy on any failure.
 //   - No re-ranking: we trust the score formula; Gemini enriches, doesn't reorder.
 
-import { GoogleGenAI } from '@google/genai'
+import { chatComplete } from '@/lib/agents/provider'
 import { COPY_MODEL } from '@/lib/agents/models'
 import type { PlanCard, Profile } from './types'
 import type { WeatherResult } from '@/lib/weather'
@@ -22,11 +22,6 @@ const MAX_CANDIDATES = 10 // top 5 dining + top 5 events
 
 type EvalRow = { id: string; why: string }
 
-function geminiClient(): GoogleGenAI {
-  const key = process.env.GOOGLE_GEMINI_API_KEY
-  if (!key) throw new Error('GOOGLE_GEMINI_API_KEY missing')
-  return new GoogleGenAI({ apiKey: key })
-}
 
 function budgetLabel(band: number): string {
   return ['', '$', '$$', '$$$', '$$$$'][band] ?? '$$'
@@ -111,13 +106,7 @@ Return ONLY a raw JSON array, no markdown, no explanation:
 }
 
 async function callGemini(prompt: string): Promise<Map<string, string>> {
-  const ai = geminiClient()
-  const result = await ai.models.generateContent({
-    model: COPY_MODEL,
-    contents: prompt,
-  })
-
-  const text = (result.text ?? '').trim()
+  const text = await chatComplete({ model: COPY_MODEL, prompt, timeoutMs: EVAL_TIMEOUT_MS })
   const match = text.match(/\[[\s\S]*\]/)
   if (!match) return new Map()
 
