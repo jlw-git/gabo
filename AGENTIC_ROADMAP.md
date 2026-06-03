@@ -105,7 +105,7 @@ clarification fatigue (ask sparingly); flag `AGENTIC_CHAT_ENABLED`.
 - [x] Multi-turn refine loop over the planner (`conversation.ts`; planner-as-tool via `apply_changes`)
 - [x] "Push back and re-plan" turn (consumes the prior request + correction)
 - [x] Single-clarifying-question heuristic (a no-tool turn asks instead of guessing)
-- [ ] Streaming UI surface (deferred — the refine bar is request/response for now)
+- [x] Chat-first intake surface + **progress streaming** (SSE status events) — `/api/plan/chat`, `ChatPanel`
 - [x] Flag (`AGENTIC_CHAT_ENABLED`) + runner instrumentation (`recordRun('conversation')`)
 
 ---
