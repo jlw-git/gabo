@@ -270,7 +270,13 @@ explainability (must show *why* it inferred a preference).
 - [x] Inference loop from save history → **recency-weighted** preferences (60-day half-life)
 - [x] Feed inferred preferences into the plan profile (client enrich; complements `applyShortlistAffinity`)
 - [x] "Why we inferred this" explainability surface (the "Leaning…" hint)
-- [x] Privacy review — **local-first** chosen (history never leaves the device)
+- [x] Privacy review — **local-first** chosen (raw history never leaves the device)
+- [x] **Negative "skip" signals** — a "Not for us" card control records a **−1** event;
+      signals are now **signed** so skips counter saves (suppress promotion). Skips
+      deliberately never feed the hard `cuisines_avoided` filter (`recordTasteEvent(_, _, -1)`)
+- [x] **LLM-narrated explanation** — `/api/taste/narrate` rewords the hint over the
+      **aggregated tags only** (flash-lite); degrades to the deterministic template;
+      gated by `AGENTIC_TASTE_NARRATE_ENABLED` so the local-first posture stays the default
 - [ ] Resolve `profiles` schema (singular → arrays) + DB store (deferred — needs auth)
 
 ---

@@ -32,6 +32,9 @@ type Props = {
   onOpenDetails: (card: PlanCardType) => void
   onShare?: (card: PlanCardType) => void
   onToggleShortlist?: (card: PlanCardType) => void
+  // F5: "Not for us" — a negative taste signal. When provided, a skip control
+  // renders; the parent removes the card and records the −1 event.
+  onSkip?: (card: PlanCardType) => void
 }
 
 export function PlanCard({
@@ -50,6 +53,7 @@ export function PlanCard({
   onOpenDetails,
   onShare,
   onToggleShortlist,
+  onSkip,
 }: Props) {
   const event = isEvent(card)
   const labels = badgeLabels(card)
@@ -134,6 +138,17 @@ export function PlanCard({
                 label={`Share ${card.name}`}
               >
                 <ShareIcon />
+              </IconButton>
+            )}
+            {onSkip && (
+              <IconButton
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onSkip(card)
+                }}
+                label={`Not for us — show fewer places like ${card.name}`}
+              >
+                <SkipIcon />
               </IconButton>
             )}
           </div>
@@ -398,6 +413,27 @@ function ShareIcon() {
       <path d="M12 3v13" />
       <path d="M8 7l4-4 4 4" />
       <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+    </svg>
+  )
+}
+
+function SkipIcon() {
+  // "No entry" circle-slash — reads as "not this one" without the finality of a
+  // close ✕ (which would imply dismissing the whole list).
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M5.6 5.6l12.8 12.8" />
     </svg>
   )
 }
