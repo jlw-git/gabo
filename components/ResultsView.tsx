@@ -210,22 +210,18 @@ export function ResultsView({
 
   const tabCards = tab === 'dining' ? visibleDining : visibleEvents
   const activeCards = useMemo(() => applyFilter(tabCards, filter, shortlist), [tabCards, filter, shortlist])
-  // Tab badges count only the cards that 'All' would surface — keeps the tab
-  // pill count in sync with the chip below it, instead of showing a higher
-  // raw-bucket number that no chip will ever match.
+  // Tab badges mirror the 'All' chip count, which is the sum of the editorial
+  // category chips rather than the raw bucket size.
   const tabCounts = useMemo<Record<Tab, number>>(
     () => ({
-      dining: applyFilter(visibleDining, 'all', shortlist).length,
-      events: applyFilter(visibleEvents, 'all', shortlist).length,
+      dining: countEditorialCategories(visibleDining).all,
+      events: countEditorialCategories(visibleEvents).all,
     }),
-    [visibleDining, visibleEvents, shortlist]
+    [visibleDining, visibleEvents]
   )
   const filterCounts = useMemo<Record<Filter, number>>(
     () => ({
-      all: applyFilter(tabCards, 'all', shortlist).length,
-      recommended: tabCards.filter(isRecommended).length,
-      limited: tabCards.filter(hasClosingSoonLabel).length,
-      new: tabCards.filter(hasJustOpenedLabel).length,
+      ...countEditorialCategories(tabCards),
       shortlist: tabCards.filter((c) => shortlist.has(c.id)).length,
     }),
     [tabCards, shortlist]
@@ -549,6 +545,19 @@ function applyFilter(cards: PlanCardType[], filter: Filter, shortlist: Set<strin
       return cards.filter(hasJustOpenedLabel)
     case 'shortlist':
       return cards.filter((c) => shortlist.has(c.id))
+  }
+}
+
+function countEditorialCategories(cards: PlanCardType[]): Omit<Record<Filter, number>, 'shortlist'> {
+  const recommended = cards.filter(isRecommended).length
+  const limited = cards.filter(hasClosingSoonLabel).length
+  const justOpened = cards.filter(hasJustOpenedLabel).length
+
+  return {
+    all: recommended + limited + justOpened,
+    recommended,
+    limited,
+    new: justOpened,
   }
 }
 
