@@ -393,11 +393,26 @@ function SkeletonCard() {
   )
 }
 
+const LOADING_STEPS = [
+  "Checking what's open…",
+  'Matching your taste…',
+  'Curating your night out…',
+]
+
 function LoadingCard() {
+  const [step, setStep] = useState(0)
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setStep((s) => Math.min(s + 1, LOADING_STEPS.length - 1))
+    }, 1800)
+    return () => clearInterval(id)
+  }, [])
+
   return (
     <div className="flex flex-col items-center gap-4 rounded-2xl bg-white p-10 ring-1 ring-stone-200">
       <div className="h-10 w-10 animate-spin rounded-full border-4 border-rose-200 border-t-rose-600" />
-      <p className="text-sm text-stone-600">Curating your night out…</p>
+      <p className="text-sm text-stone-600 transition-all duration-300">{LOADING_STEPS[step]}</p>
     </div>
   )
 }
@@ -405,7 +420,7 @@ function LoadingCard() {
 function ErrorCard({ message, onBack }: { message: string; onBack: () => void }) {
   return (
     <div className="rounded-2xl bg-white p-6 ring-1 ring-rose-200">
-      <h2 className="mb-2 font-semibold text-rose-700">That didn’t work</h2>
+      <h2 className="mb-2 font-semibold text-rose-700">That didn&apos;t work</h2>
       <p className="mb-4 text-sm text-stone-600">{message}</p>
       <button
         onClick={onBack}
