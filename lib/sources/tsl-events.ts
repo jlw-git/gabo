@@ -17,7 +17,7 @@
 //   - Address resolution via OneMap, same defensive pattern as blog-scanner.
 
 import * as cheerio from 'cheerio'
-import { GoogleGenAI } from '@google/genai'
+import { chatComplete } from '@/lib/agents/provider'
 import { searchPlaces } from '@/lib/onemap/client'
 import type { HoursJson } from '@/lib/planner/types'
 import type { EditorialEvent } from './editorial-events'
@@ -94,11 +94,6 @@ type ExtractedEvent = {
   is_outdoor: boolean
 }
 
-function geminiClient(): GoogleGenAI {
-  const key = process.env.GOOGLE_GEMINI_API_KEY
-  if (!key) throw new Error('GOOGLE_GEMINI_API_KEY missing')
-  return new GoogleGenAI({ apiKey: key })
-}
 
 function slugify(s: string): string {
   return s
@@ -158,7 +153,6 @@ async function extractEvent(
   text: string,
   imageUrls: string[]
 ): Promise<ExtractedEvent | null> {
-  const ai = geminiClient()
   const imageList =
     imageUrls.length > 0
       ? imageUrls.map((u, i) => `  ${i}: ${u}`).join('\n')
@@ -199,12 +193,7 @@ REJECT (return null) if any of these apply:
 
 Return ONLY raw JSON or the literal "null" — no markdown, no commentary.`
 
-  const result = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: prompt,
-  })
-
-  const raw = (result.text ?? '').trim()
+  const raw = (await chatComplete({ model: 'gemini-2.5-flash', prompt })).trim()
   if (!raw || raw === 'null') return null
 
   const jsonMatch = raw.match(/\{[\s\S]*\}/)

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { PlanDateForm } from '@/components/PlanDateForm'
 import { RecommendationsFeed } from '@/components/RecommendationsFeed'
 import { ResultsView, type Buckets } from '@/components/ResultsView'
+import { ChatPanel } from '@/components/ChatPanel'
 import type { ChatTurn, RefineResult } from '@/components/RefineBar'
 import type { PlaceSelection } from '@/components/PlaceSearchInput'
 import type { PlanRequest } from '@/lib/planner/request-validation'
@@ -25,6 +26,7 @@ import {
 import type { LatLng } from '@/lib/planner/types'
 
 const TASTE_ENABLED = process.env.NEXT_PUBLIC_AGENTIC_TASTE_ENABLED === 'true'
+const CHAT_ENABLED = process.env.NEXT_PUBLIC_AGENTIC_CHAT_ENABLED === 'true'
 
 type Diagnostics = {
   candidatesTotal: number
@@ -35,6 +37,7 @@ type Diagnostics = {
 
 type Stage =
   | { kind: 'form' }
+  | { kind: 'chat' }
   | { kind: 'loading' }
   | {
       kind: 'results'
@@ -228,6 +231,33 @@ export default function Home() {
     })
   }
 
+  // Chat-first intake (F1): the conversation produced a plan — transition to the
+  // results stage carrying the request + buckets + the chat thread so the refine
+  // bar continues the same conversation.
+  function handleChatPlanned(request: PlanRequest, buckets: Buckets, chat: ChatTurn[]) {
+    const toSel = (p: LatLng | null, label: string): PlaceSelection | null =>
+      p ? { label, address: '', lat: p.lat, lng: p.lng } : null
+    const startsProvided = ((request.start_a ? 1 : 0) + (request.start_b ? 1 : 0)) as 0 | 1 | 2
+    setStage({
+      kind: 'results',
+      buckets,
+      scheduledFor: new Date(request.scheduled_for),
+      overrideTags: request.override_tags,
+      startA: toSel(request.start_a, 'You'),
+      startB: toSel(request.start_b, 'Partner'),
+      weather: null,
+      outdoorExcluded: 0,
+      diagnostics: {
+        candidatesTotal: 0,
+        afterLocalFilters: 0,
+        relaxationAttempted: false,
+        startsProvided,
+      },
+      request,
+      chat,
+    })
+  }
+
   return (
     <main className="gabo-bg flex min-h-screen w-full flex-col items-center px-4 py-8 md:px-8 md:py-12">
       {!hydrated && (
@@ -245,7 +275,31 @@ export default function Home() {
             plannerName={stored.profile.planner_name}
             partnerName={stored.profile.partner_name}
           />
+          {CHAT_ENABLED && (
+            <button
+              onClick={() => setStage({ kind: 'chat' })}
+              className="-mt-6 self-start text-sm font-medium text-stone-500 hover:text-stone-800"
+            >
+              💬 Or plan by chat →
+            </button>
+          )}
           <RecommendationsFeed profile={stored.profile} />
+        </div>
+      )}
+      {hydrated && stage.kind === 'chat' && stored && (
+        <div className="w-full max-w-md md:max-w-2xl">
+          <ChatPanel
+            initialDraft={{
+              start_a: null,
+              start_b: null,
+              scheduled_for: '',
+              override_tags: [],
+              profile: stored.profile,
+              shortlist_ids: loadShortlist(),
+            }}
+            onPlanned={handleChatPlanned}
+            onBack={() => setStage({ kind: 'form' })}
+          />
         </div>
       )}
       {hydrated && stage.kind === 'loading' && (

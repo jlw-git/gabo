@@ -105,7 +105,7 @@ clarification fatigue (ask sparingly); flag `AGENTIC_CHAT_ENABLED`.
 - [x] Multi-turn refine loop over the planner (`conversation.ts`; planner-as-tool via `apply_changes`)
 - [x] "Push back and re-plan" turn (consumes the prior request + correction)
 - [x] Single-clarifying-question heuristic (a no-tool turn asks instead of guessing)
-- [ ] Streaming UI surface (deferred — the refine bar is request/response for now)
+- [x] Chat-first intake surface + **progress streaming** (SSE status events) — `/api/plan/chat`, `ChatPanel`
 - [x] Flag (`AGENTIC_CHAT_ENABLED`) + runner instrumentation (`recordRun('conversation')`)
 
 ---
@@ -137,6 +137,8 @@ set. The agent sequences *within* that vetted set; it can't resurrect a filtered
 - [x] Feasibility + sequencing — **deterministic** timing/closing-window check; LLM only picks + narrates
 - [x] Itinerary result shape + "✨ Evening" timeline UI (with alternatives)
 - [x] Flag (`AGENTIC_ITINERARY_ENABLED`) + runner instrumentation (`recordRun('itinerary')`)
+- [x] **3-stop** evenings — optional drinks/dessert nightcap, appended only when feasible
+- [x] **Multi-stop map polyline** — `ItineraryMiniMap` (numbered pins + drive-route line)
 
 ---
 
@@ -233,9 +235,9 @@ only, never per-request); junk-source guard. Cron-side, so no user latency.
 
 **Phases.**
 - [x] Verifier debate (proposer/skeptic + **deterministic tie-break**) — blog-extraction verifier, live in `sync-blogs`; built reusably for museum/freshness
-- [ ] Adopt the debate in the museum + freshness verifiers
-- [ ] Link-following / source-discovery loop (deferred)
-- [ ] Cross-reference + dedup against live catalog before proposing (deferred)
+- [x] Adopt the debate in the **museum + freshness** verifiers (grounded; one `AGENTIC_VERIFIER_DEBATE` flag governs all three)
+- [x] Autonomous **source discovery** — grounded agent proposes novel SG sources, deterministically de-duped + reachability-gated, recorded for review (`/api/admin/discover-sources`); never auto-ingests
+- [ ] Write-time cross-blog dedup (deferred — needs a `critic_pick` redesign; read-time dedup already covers the user)
 - [ ] Self-heal on extraction failure (adapt when a site changes) (deferred)
 
 ---

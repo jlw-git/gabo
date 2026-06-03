@@ -12,6 +12,7 @@ export type RunKind =
   | 'dining'
   | 'conversation'
   | 'itinerary'
+  | 'source-discovery'
 
 export async function recordRun(kind: RunKind, summary: unknown): Promise<void> {
   try {

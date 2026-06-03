@@ -21,14 +21,20 @@ import type { PlanCard, TransitMode } from '@/lib/planner/types'
 // Dwell times (minutes) and bounds. Conservative defaults; tunable later.
 const DINNER_DWELL_MIN = 90
 const ACTIVITY_DWELL_MIN = 45
+const NIGHTCAP_DWELL_MIN = 45
 const MAX_PER_ROLE = 4 // top-N dinners × top-N activities considered
 const MAX_PAIRS_TO_ROUTE = 8 // bound OneMap calls per compose
+const MAX_NIGHTCAP_TO_ROUTE = 2 // bound nightcap routing per evening
 const LEG_MAX_MIN = 45 // a leg longer than this isn't a pleasant evening
 const KEEP_FEASIBLE = 5 // hand at most this many to the LLM
 
+// A nightcap (optional 3rd stop) is a dining venue tagged for drinks or dessert.
+const DRINK_TAGS = new Set(['bar', 'cocktail'])
+const DESSERT_TAGS = new Set(['cafe', 'dessert', 'bakery'])
+
 export type ItineraryStop = {
   card: PlanCard
-  role: 'dinner' | 'activity'
+  role: 'dinner' | 'activity' | 'nightcap'
   arrive: string // ISO; formatted client-side
   dwell_min: number
 }
@@ -36,13 +42,22 @@ export type ItineraryStop = {
 export type ItineraryLeg = {
   mode: TransitMode
   duration_min: number
+  // Drive-route geometry [lng,lat][] for the map polyline; absent on failure.
+  path?: [number, number][]
 }
 
 export type Itinerary = {
   stops: ItineraryStop[]
-  leg: ItineraryLeg
+  legs: ItineraryLeg[] // one per gap (stops.length - 1)
   total_min: number
   why?: string
+}
+
+function nightcapKind(card: PlanCard): 'drinks' | 'dessert' | null {
+  const tags = card.cuisine_tags
+  if (tags.some((t) => DRINK_TAGS.has(t))) return 'drinks'
+  if (tags.some((t) => DESSERT_TAGS.has(t))) return 'dessert'
+  return null
 }
 
 export type ComposeInput = {
@@ -160,17 +175,26 @@ export async function composeItinerary(input: ComposeInput): Promise<Itinerary[]
 
   const built = top.map((f) => toItinerary(f, input.mode))
 
+  // Optionally extend each evening with a nightcap (drinks/dessert) when feasible.
+  const withNightcaps = await Promise.all(
+    built.map((it) => appendNightcap(it, input.dining, input.mode))
+  )
+
   // LLM selection + copy over the feasible set. Picks the best up to 3 and
   // writes a "why this evening flows" line. Falls back to the deterministic
   // top-3 with formula copy on any failure.
-  const chosen = await selectAndNarrate(built)
+  const chosen = await selectAndNarrate(withNightcaps)
+
+  // Fetch route geometry only for the few itineraries we'll actually show.
+  const enriched = await enrichGeometry(chosen)
+
   void recordRun('itinerary', {
     feasible: feasible.length,
-    returned: chosen.length,
+    returned: enriched.length,
+    three_stop: enriched.filter((it) => it.stops.length === 3).length,
     mode: input.mode,
-    llm: chosen.some((c) => c.why && !c.why.startsWith('Dinner at')),
   })
-  return chosen
+  return enriched
 }
 
 function toItinerary(f: Feasible, mode: TransitMode): Itinerary {
@@ -190,28 +214,88 @@ function toItinerary(f: Feasible, mode: TransitMode): Itinerary {
     f.order === 'dinner_first' ? [dinnerStop, activityStop] : [activityStop, dinnerStop]
   return {
     stops,
-    leg: { mode, duration_min: f.legMin },
+    legs: [{ mode, duration_min: f.legMin }],
     total_min: DINNER_DWELL_MIN + ACTIVITY_DWELL_MIN + f.legMin,
-    why: formulaWhy(stops, f.legMin, mode),
+    why: formulaWhy(stops),
   }
 }
 
-function formulaWhy(stops: ItineraryStop[], legMin: number, mode: TransitMode): string {
-  const [first, second] = stops
-  const by = mode === 'transit' ? 'MRT/bus' : 'car'
-  return `${first.card.name}, then ${second.card.name} — ${legMin} min by ${by}.`
+function formulaWhy(stops: ItineraryStop[]): string {
+  return `${stops.map((s) => s.card.name).join(', then ')}.`
+}
+
+// Try to append a nightcap (drinks/dessert) after the evening's last stop.
+// Deterministic feasibility: open on arrival + a short reachable leg. Returns
+// the 3-stop itinerary when feasible, else the original 2-stop one.
+async function appendNightcap(
+  it: Itinerary,
+  dining: PlanCard[],
+  mode: TransitMode
+): Promise<Itinerary> {
+  const last = it.stops[it.stops.length - 1]
+  const lastEnd = addMinutes(new Date(last.arrive), last.dwell_min)
+  const used = new Set(it.stops.map((s) => s.card.id))
+
+  const candidates = dining
+    .filter((c) => !used.has(c.id) && nightcapKind(c) !== null)
+    .map((c) => ({ c, km: distanceKm(last.card, c) }))
+    .sort((a, b) => a.km - b.km)
+    .slice(0, MAX_NIGHTCAP_TO_ROUTE)
+
+  for (const { c } of candidates) {
+    const legMin = await legMinutes(last.card, c, mode, lastEnd)
+    if (legMin == null || legMin > LEG_MAX_MIN) continue
+    const arrive = addMinutes(lastEnd, legMin)
+    if (!isVenueOpenForMeal(c, arrive, NIGHTCAP_DWELL_MIN)) continue
+    const stops = [
+      ...it.stops,
+      { card: c, role: 'nightcap' as const, arrive: arrive.toISOString(), dwell_min: NIGHTCAP_DWELL_MIN },
+    ]
+    return {
+      stops,
+      legs: [...it.legs, { mode, duration_min: legMin }],
+      total_min: it.total_min + legMin + NIGHTCAP_DWELL_MIN,
+      why: formulaWhy(stops),
+    }
+  }
+  return it
+}
+
+// Fetch drive-route geometry for each leg of the chosen itineraries (bounded:
+// only what we'll show). Used for the map polyline; straight-line fallback in
+// the view when a path is absent.
+async function enrichGeometry(its: Itinerary[]): Promise<Itinerary[]> {
+  return Promise.all(
+    its.map(async (it) => {
+      const legs = await Promise.all(
+        it.legs.map(async (leg, i) => {
+          try {
+            const r = await fetchDriveRoute(
+              { lat: it.stops[i].card.lat, lng: it.stops[i].card.lng },
+              { lat: it.stops[i + 1].card.lat, lng: it.stops[i + 1].card.lng }
+            )
+            const coords = r.geometry?.coordinates as [number, number][] | undefined
+            return coords && coords.length > 1 ? { ...leg, path: coords } : leg
+          } catch {
+            return leg
+          }
+        })
+      )
+      return { ...it, legs }
+    })
+  )
 }
 
 async function selectAndNarrate(built: Itinerary[]): Promise<Itinerary[]> {
   if (built.length === 0) return built
   const list = built
-    .map((it, i) => {
-      const [a, b] = it.stops
-      return `${i}: ${a.card.name} (${a.role}) → ${b.card.name} (${b.role}), ${it.leg.duration_min} min apart`
-    })
+    .map(
+      (it, i) =>
+        `${i}: ${it.stops.map((s) => `${s.card.name} (${s.role})`).join(' → ')}`
+    )
     .join('\n')
 
-  const prompt = `You are picking the best date-night evenings for a Singapore couple. Each option below is a feasible 2-stop evening (dinner + an activity) that the planner already verified for timing and travel. Choose the best 1-3 and write a short, warm one-sentence reason each (max ~18 words) describing how the evening flows.
+  const prompt = `You are picking the best date-night evenings for a Singapore couple. Each option below is a feasible evening — dinner + an activity, sometimes with a drinks/dessert nightcap — that the planner already verified for timing and travel. Choose the best 1-3 and write a short, warm one-sentence reason each (max ~18 words) describing how the evening flows.
 
 Options:
 ${list}
