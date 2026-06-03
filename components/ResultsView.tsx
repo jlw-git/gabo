@@ -242,7 +242,11 @@ export function ResultsView({
           ← New search
         </button>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-          {totalCards === 0 ? 'Nothing fits this slot.' : 'Here’s what we found.'}
+          {totalCards === 0
+            ? "Nothing fits this slot."
+            : chat.length > 0
+              ? "Updated for you."
+              : "Here's what we found."}
         </h1>
         <p className="text-sm text-stone-500">
           {scheduledFor.toLocaleString('en-SG', {
@@ -259,10 +263,6 @@ export function ResultsView({
           {!startA && !startB && ' · islandwide'}
         </p>
       </header>
-
-      {request && onRefined && (
-        <RefineBar request={request} chat={chat} onRefined={onRefined} />
-      )}
 
       {weather?.condition === 'rain' && outdoorExcluded > 0 && (
         <div className="flex items-start gap-2 rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-900 ring-1 ring-sky-200">
@@ -405,6 +405,10 @@ export function ResultsView({
             </div>
           )}
         </div>
+      )}
+
+      {request && onRefined && (
+        <RefineBar request={request} chat={chat} onRefined={onRefined} />
       )}
 
       {booking && (
@@ -558,13 +562,13 @@ function emptyHeadlineForFilter(tab: Tab, filter: Filter): { headline: string; b
   if (filter === 'limited') {
     return {
       headline: 'No limited-run picks for this slot.',
-      body: 'Closing-soon pop-ups in this category aren’t open at this time.',
+      body: "Closing-soon pop-ups in this category aren’t open at this time.",
     }
   }
   if (filter === 'new') {
     return {
       headline: 'No just-opened picks for this slot.',
-      body: 'Recently-opened spots in this category aren’t open at this time.',
+      body: "Recently-opened spots in this category aren’t open at this time.",
     }
   }
   if (filter === 'recommended') {
