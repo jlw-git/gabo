@@ -137,6 +137,8 @@ set. The agent sequences *within* that vetted set; it can't resurrect a filtered
 - [x] Feasibility + sequencing — **deterministic** timing/closing-window check; LLM only picks + narrates
 - [x] Itinerary result shape + "✨ Evening" timeline UI (with alternatives)
 - [x] Flag (`AGENTIC_ITINERARY_ENABLED`) + runner instrumentation (`recordRun('itinerary')`)
+- [x] **3-stop** evenings — optional drinks/dessert nightcap, appended only when feasible
+- [x] **Multi-stop map polyline** — `ItineraryMiniMap` (numbered pins + drive-route line)
 
 ---
 

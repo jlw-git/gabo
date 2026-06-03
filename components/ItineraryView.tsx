@@ -4,6 +4,7 @@ import { useState } from 'react'
 import type { PlanCard as PlanCardType } from '@/lib/planner/types'
 import type { Itinerary } from '@/lib/planner/itinerary'
 import { photoUrlOrFallback } from '@/lib/photo-fallback'
+import { ItineraryMiniMap } from './ItineraryMiniMap'
 
 type Props = {
   itineraries: Itinerary[]
@@ -21,7 +22,11 @@ function fmtTime(iso: string): string {
   })
 }
 
-const ROLE_LABEL: Record<string, string> = { dinner: 'Dinner', activity: 'Activity' }
+const ROLE_LABEL: Record<string, string> = {
+  dinner: 'Dinner',
+  activity: 'Activity',
+  nightcap: 'Nightcap',
+}
 
 export function ItineraryView({ itineraries, onOpenDetails }: Props) {
   const [selected, setSelected] = useState(0)
@@ -64,21 +69,26 @@ export function ItineraryView({ itineraries, onOpenDetails }: Props) {
       <div className="rounded-2xl bg-white p-5 ring-1 ring-stone-200">
         {it.why && <p className="mb-4 text-sm font-medium text-stone-800">✨ {it.why}</p>}
 
-        <ol className="relative space-y-3">
-          {it.stops.map((stop, i) => (
-            <li key={`${stop.card.id}-${i}`}>
-              <StopRow stop={stop} onOpen={onOpenDetails} />
-              {i < it.stops.length - 1 && (
-                <div className="my-2 flex items-center gap-2 pl-4 text-xs text-stone-500">
-                  <span aria-hidden="true">{it.leg.mode === 'transit' ? '🚆' : '🚗'}</span>
-                  <span>
-                    {it.leg.duration_min} min by {it.leg.mode === 'transit' ? 'MRT / bus' : 'car'}
-                  </span>
-                  <span className="h-px flex-1 bg-stone-200" />
-                </div>
-              )}
-            </li>
-          ))}
+        <ItineraryMiniMap stops={it.stops} legs={it.legs} />
+
+        <ol className="relative mt-4 space-y-3">
+          {it.stops.map((stop, i) => {
+            const leg = it.legs[i]
+            return (
+              <li key={`${stop.card.id}-${i}`}>
+                <StopRow stop={stop} index={i + 1} onOpen={onOpenDetails} />
+                {leg && i < it.stops.length - 1 && (
+                  <div className="my-2 flex items-center gap-2 pl-4 text-xs text-stone-500">
+                    <span aria-hidden="true">{leg.mode === 'transit' ? '🚆' : '🚗'}</span>
+                    <span>
+                      {leg.duration_min} min by {leg.mode === 'transit' ? 'MRT / bus' : 'car'}
+                    </span>
+                    <span className="h-px flex-1 bg-stone-200" />
+                  </div>
+                )}
+              </li>
+            )
+          })}
         </ol>
 
         <p className="mt-4 text-xs text-stone-400">
@@ -91,9 +101,11 @@ export function ItineraryView({ itineraries, onOpenDetails }: Props) {
 
 function StopRow({
   stop,
+  index,
   onOpen,
 }: {
   stop: Itinerary['stops'][number]
+  index: number
   onOpen?: (card: PlanCardType) => void
 }) {
   const { card } = stop
@@ -103,12 +115,17 @@ function StopRow({
       onClick={() => onOpen?.(card)}
       className="flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-stone-50"
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={photoUrlOrFallback(card)}
-        alt=""
-        className="h-14 w-14 flex-shrink-0 rounded-lg object-cover ring-1 ring-stone-200"
-      />
+      <div className="relative flex-shrink-0">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={photoUrlOrFallback(card)}
+          alt=""
+          className="h-14 w-14 rounded-lg object-cover ring-1 ring-stone-200"
+        />
+        <span className="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-stone-900 text-[10px] font-bold text-white ring-2 ring-white">
+          {index}
+        </span>
+      </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-stone-500">
