@@ -26,6 +26,7 @@ import type { Itinerary } from '@/lib/planner/itinerary'
 import type { PlanRequest } from '@/lib/planner/request-validation'
 
 const ITINERARY_ENABLED = process.env.NEXT_PUBLIC_AGENTIC_ITINERARY_ENABLED === 'true'
+const TASTE_ENABLED = process.env.NEXT_PUBLIC_AGENTIC_TASTE_ENABLED === 'true'
 
 export type Buckets = {
   dining: PlanCardType[]
@@ -98,6 +99,10 @@ export function ResultsView({
   const [tab, setTab] = useState<Tab>('dining')
   const [filter, setFilter] = useState<Filter>('all')
   const [shortlist, setShortlist] = useState<Set<string>>(new Set())
+  // F5: cards the user marked "Not for us" this session. Hidden from the list +
+  // recorded as a negative taste signal. Session-scoped — a fresh plan starts
+  // clean (the taste model carries the longitudinal memory).
+  const [skipped, setSkipped] = useState<Set<string>>(new Set())
   // Transit-first by default — most SG date-night searches happen for people
   // taking the MRT, not driving. The profile.transit_pref signal is too weak
   // to override that (it's a one-off onboarding chip that few users revisit).
@@ -117,10 +122,26 @@ export function ResultsView({
         next.add(card.id)
         logShortlistEvent(card.id)
         // F5: feed the longitudinal taste memory (gated, client-only).
-        if (process.env.NEXT_PUBLIC_AGENTIC_TASTE_ENABLED === 'true') {
-          recordTasteEvent(card.cuisine_tags, card.vibe_tags)
+        if (TASTE_ENABLED) {
+          recordTasteEvent(card.cuisine_tags, card.vibe_tags, 1)
         }
       }
+      saveShortlist([...next])
+      return next
+    })
+  }
+
+  // F5: "Not for us" — hide the card and record a −1 taste event over its tags.
+  // If the card was shortlisted, un-shortlist it (a skip contradicts a save).
+  function skipCard(card: PlanCardType) {
+    if (TASTE_ENABLED) {
+      recordTasteEvent(card.cuisine_tags, card.vibe_tags, -1)
+    }
+    setSkipped((prev) => new Set(prev).add(card.id))
+    setShortlist((prev) => {
+      if (!prev.has(card.id)) return prev
+      const next = new Set(prev)
+      next.delete(card.id)
       saveShortlist([...next])
       return next
     })
@@ -137,8 +158,8 @@ export function ResultsView({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          dining: buckets.dining,
-          events: buckets.events,
+          dining: visibleDining,
+          events: visibleEvents,
           scheduled_for: scheduledFor.toISOString(),
           mode,
         }),
@@ -155,7 +176,6 @@ export function ResultsView({
     }
   }
 
-  const totalCards = buckets.dining.length + buckets.events.length
   // Prefer the start-point name in the ETA pill — "Tampines MRT" / "Buona
   // Vista" reads more concretely than "You" / "Partner", and matches the map
   // labels the user just picked. Fall back to the user's name from onboarding
@@ -165,10 +185,22 @@ export function ResultsView({
   const plannerLabel = truncateLabel(startA?.label || profile.planner_name?.trim() || 'You')
   const partnerLabel = truncateLabel(startB?.label || profile.partner_name?.trim() || 'Partner')
 
-  const allCards = useMemo(
-    () => [...buckets.dining, ...buckets.events],
-    [buckets.dining, buckets.events]
+  // F5: drop "Not for us" cards from every downstream view (lists, counts, map,
+  // ETA toggle) so a skip removes the card everywhere at once.
+  const visibleDining = useMemo(
+    () => buckets.dining.filter((c) => !skipped.has(c.id)),
+    [buckets.dining, skipped]
   )
+  const visibleEvents = useMemo(
+    () => buckets.events.filter((c) => !skipped.has(c.id)),
+    [buckets.events, skipped]
+  )
+
+  const allCards = useMemo(
+    () => [...visibleDining, ...visibleEvents],
+    [visibleDining, visibleEvents]
+  )
+  const totalCards = allCards.length
 
   function confirmBooking(card: PlanCardType) {
     setBooking(null)
@@ -176,17 +208,17 @@ export function ResultsView({
     window.open(bookingUrl(card), '_blank', 'noopener,noreferrer')
   }
 
-  const tabCards = tab === 'dining' ? buckets.dining : buckets.events
+  const tabCards = tab === 'dining' ? visibleDining : visibleEvents
   const activeCards = useMemo(() => applyFilter(tabCards, filter, shortlist), [tabCards, filter, shortlist])
   // Tab badges count only the cards that 'All' would surface — keeps the tab
   // pill count in sync with the chip below it, instead of showing a higher
   // raw-bucket number that no chip will ever match.
   const tabCounts = useMemo<Record<Tab, number>>(
     () => ({
-      dining: applyFilter(buckets.dining, 'all', shortlist).length,
-      events: applyFilter(buckets.events, 'all', shortlist).length,
+      dining: applyFilter(visibleDining, 'all', shortlist).length,
+      events: applyFilter(visibleEvents, 'all', shortlist).length,
     }),
-    [buckets.dining, buckets.events, shortlist]
+    [visibleDining, visibleEvents, shortlist]
   )
   const filterCounts = useMemo<Record<Filter, number>>(
     () => ({
@@ -342,7 +374,7 @@ export function ResultsView({
               tab={tab}
               filter={filter}
               otherTabHasContent={
-                (tab === 'dining' ? buckets.events.length : buckets.dining.length) > 0
+                (tab === 'dining' ? visibleEvents.length : visibleDining.length) > 0
               }
               onClearFilter={() => setFilter('all')}
               onSwitchTab={() => setTab(tab === 'dining' ? 'events' : 'dining')}
@@ -367,6 +399,7 @@ export function ResultsView({
                   onOpenDetails={(card) => setDetails(card)}
                   onShare={(card) => setShared(card)}
                   onToggleShortlist={toggleShortlist}
+                  onSkip={TASTE_ENABLED ? skipCard : undefined}
                 />
               ))}
             </div>

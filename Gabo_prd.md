@@ -135,7 +135,7 @@ Each keeps the user-visible decision (scoring, feasibility, keep/drop, action ti
 | **F2 · Evening itinerary** | flash-lite, single-shot | On-demand `/api/plan/itinerary`; **feasibility (timing/reachability) is deterministic**, the LLM only picks the best feasible evening + writes the pacing line (`lib/planner/itinerary.ts`) | `AGENTIC_ITINERARY_ENABLED` + `NEXT_PUBLIC_…` |
 | **F4 · Verifier debate** | flash-lite, **2-call debate** | Cron blog-extraction; proposer + skeptic, then a **pure deterministic tie-break** decides keep/flag/drop (`runner.ts#resolveDebate`) | `AGENTIC_VERIFIER_DEBATE` |
 | **F3 · Booking concierge** | **none** (deterministic) | Client gate; tier-classifies actions (irreversible/reversible/outward), confirms the real payload, opens the real provider page — never fabricates a booking (`lib/booking/*`, `BookingOverlay`) | `NEXT_PUBLIC_AGENTIC_BOOKING_ENABLED` |
-| **F5 · Taste memory** | **none** (deterministic) | Client; recency-weighted affinity over the local save history enriches the plan profile (reuses `matchScore`); explainable "Leaning…" hint (`lib/taste-memory.ts`) | `NEXT_PUBLIC_AGENTIC_TASTE_ENABLED` |
+| **F5 · Taste memory** | optional flash-lite for the hint **wording only** | Client; **signed** recency-weighted affinity over local saves (+1) and "Not for us" skips (−1) enriches the plan profile (reuses `matchScore`; skips suppress promotion, never the hard `cuisines_avoided` filter); explainable "Leaning…" hint, optionally reworded by an LLM over the **aggregated tags only** (`lib/taste-memory.ts`, `/api/taste/narrate`) | `NEXT_PUBLIC_AGENTIC_TASTE_ENABLED` (+ `AGENTIC_TASTE_NARRATE_ENABLED` / `NEXT_PUBLIC_…` for the LLM hint) |
 
 **Deterministic (the user-visible decisions):**
 
@@ -367,3 +367,28 @@ looks up the cuisine and vibe tags of saved venues and merges them into a
 working `Profile` for that plan. Effect: venues sharing tags with the
 user's shortlist get the same `matchScore` boost as their explicit
 preferences. Cuisines that the user has explicitly avoided are not added.
+
+### 10.1 Longitudinal taste memory (F5, flag-gated, ship-dark)
+
+Beyond the stateless shortlist affinity above, the taste model
+(`lib/taste-memory.ts`, gated by `NEXT_PUBLIC_AGENTIC_TASTE_ENABLED`) keeps a
+**persistent, signed** log of taste signals in `localStorage['gabo:taste-events-v1']`:
+
+- **Save (+1)** — shortlisting a card records a positive event over its cuisine + vibe tags.
+- **"Not for us" (−1)** — a skip control on each result card records a negative
+  event over the same tags and hides the card from the results (list, map, counts).
+
+Signals aggregate into one **signed, recency-weighted** weight per tag (60-day
+half-life), so a skip subtracts what a same-day save would add. Net-positive tags
+above the floor enrich the working profile (additive — never overriding explicit
+choices); skips therefore **suppress promotion** but, by design, never feed the
+**hard `cuisines_avoided` filter** (inferred taste must not be able to empty a
+result set). A small **"Leaning…"** hint on the form explains the inference.
+
+**LLM narration (optional, `AGENTIC_TASTE_NARRATE_ENABLED`).** When enabled, the
+hint is reworded by `flash-lite` via `/api/taste/narrate` into one warmer line
+(e.g. *"Cozy Japanese and Italian nights are always a hit"*). Privacy: only the
+**aggregated top tags** — the same ones the deterministic hint already shows —
+leave the device; the raw event log never does. The call is non-blocking and
+degrades to the deterministic template on any failure, so the feature is
+local-first by default and the narration is a thin, optional copy layer.

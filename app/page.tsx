@@ -21,11 +21,16 @@ import {
   computeTasteAffinity,
   enrichProfileWithTaste,
   loadTasteEvents,
+  tasteNarrationPayload,
   tasteSummary,
 } from '@/lib/taste-memory'
 import type { LatLng } from '@/lib/planner/types'
 
 const TASTE_ENABLED = process.env.NEXT_PUBLIC_AGENTIC_TASTE_ENABLED === 'true'
+// LLM-narrated hint (F5 flesh-out). When off, the hint stays the deterministic
+// templated summary and nothing leaves the device.
+const TASTE_NARRATE_ENABLED =
+  process.env.NEXT_PUBLIC_AGENTIC_TASTE_NARRATE_ENABLED === 'true'
 const CHAT_ENABLED = process.env.NEXT_PUBLIC_AGENTIC_CHAT_ENABLED === 'true'
 
 type Diagnostics = {
@@ -338,8 +343,41 @@ export default function Home() {
 // F5: explainable taste hint. Reads the local taste log (client-only; this
 // block renders post-hydration so there's no SSR mismatch) and shows the
 // inferred leaning. Renders nothing below the signal floor.
+//
+// The deterministic templated summary shows immediately. When the narrate flag
+// is on, we then ask the LLM (server-side, over the aggregated tags only) for a
+// warmer line and swap it in if it returns — so the hint never blocks on the
+// network and degrades cleanly to the template.
 function TasteHint() {
-  const summary = tasteSummary(computeTasteAffinity(loadTasteEvents(), Date.now()))
+  const [summary, setSummary] = useState<string | null>(null)
+
+  useEffect(() => {
+    const aff = computeTasteAffinity(loadTasteEvents(), Date.now())
+    const templated = tasteSummary(aff)
+    setSummary(templated)
+    if (!templated || !TASTE_NARRATE_ENABLED) return
+
+    const payload = tasteNarrationPayload(aff)
+    if (!payload) return
+
+    let cancelled = false
+    fetch('/api/taste/narrate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { narration?: string | null } | null) => {
+        if (!cancelled && data?.narration) setSummary(data.narration)
+      })
+      .catch(() => {
+        /* keep the templated summary */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   if (!summary) return null
   return (
     <div className="flex items-center gap-2 self-start rounded-full bg-white px-3 py-1.5 text-xs text-stone-600 ring-1 ring-stone-200">
