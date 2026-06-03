@@ -536,9 +536,7 @@ function EmptyStateDiagnostic({
 function applyFilter(cards: PlanCardType[], filter: Filter, shortlist: Set<string>): PlanCardType[] {
   switch (filter) {
     case 'all':
-      return cards.filter(
-        (c) => isRecommended(c) || hasClosingSoonLabel(c) || hasJustOpenedLabel(c),
-      )
+      return cards
     case 'recommended':
       return cards.filter(isRecommended)
     case 'limited':
