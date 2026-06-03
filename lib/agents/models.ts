@@ -26,9 +26,14 @@ export const COPY_MODEL = 'gemini-2.5-flash-lite'
 export const TRIAGE_MODEL = 'gemini-2.5-flash-lite'
 export const RANKER_MODEL = 'gemini-2.5-flash-lite'
 
-// Orchestration model for the conversational planner (F1). Drives a bounded
-// tool-use loop (planner-as-tool), so it needs reliable function-calling —
-// 'flash', not 'flash-lite'. To run the loop on Claude, set this to e.g.
-// 'anthropic/claude-3.5-sonnet' and add OPENROUTER_API_KEY — the provider's
-// OpenRouter tool-loop handles it (no SDK change). See AGENTIC_ROADMAP.md F1.
-export const ORCHESTRATION_MODEL = 'gemini-2.5-flash'
+// Orchestration model for the conversational planner (F1) — the agentic/tool-
+// calling path. Kimi K2.6 is the standout for tool-calling, run via OpenRouter.
+// NOTE: this is an OpenRouter-only slug, so F1 now REQUIRES OPENROUTER_API_KEY;
+// without it the refine loop degrades gracefully (returns "couldn't adjust").
+export const ORCHESTRATION_MODEL = 'moonshotai/kimi-k2.6'
+
+// Automatic fallback for OpenRouter calls (resilience when the primary model is
+// unavailable / rate-limited). Applied via OpenRouter's `models` array, so e.g.
+// the Kimi orchestration call fails over to DeepSeek V4 without extra code.
+// Empty string disables the fallback. ('deepseek/deepseek-v4-flash' for cheaper.)
+export const OPENROUTER_FALLBACK_MODEL = 'deepseek/deepseek-v4-pro'

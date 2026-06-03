@@ -8,8 +8,17 @@
 // regardless of provider.
 
 import { GoogleGenAI, type Content, type FunctionCall, type Part } from '@google/genai'
+import { OPENROUTER_FALLBACK_MODEL } from '@/lib/agents/models'
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+
+// Build the OpenRouter model field. When a fallback is configured, use
+// OpenRouter's `models` array so a primary outage fails over automatically
+// (e.g. Kimi K2.6 → DeepSeek V4) with no extra round-trip.
+export function orModels(mapped: string): Record<string, unknown> {
+  const fb = OPENROUTER_FALLBACK_MODEL
+  return fb && fb !== mapped ? { models: [mapped, fb] } : { model: mapped }
+}
 
 export type Provider = 'gemini' | 'openrouter'
 
@@ -104,7 +113,7 @@ export async function chatComplete(opts: ChatCompleteOptions): Promise<string> {
       const res = await fetch(OPENROUTER_URL, {
         method: 'POST',
         headers: openRouterHeaders(),
-        body: JSON.stringify({ model, messages: [{ role: 'user', content: opts.prompt }] }),
+        body: JSON.stringify({ ...orModels(model), messages: [{ role: 'user', content: opts.prompt }] }),
         signal: AbortSignal.timeout(timeoutMs),
       })
       if (!res.ok) return ''
@@ -238,7 +247,7 @@ async function openRouterToolLoop(
     const res = await fetch(OPENROUTER_URL, {
       method: 'POST',
       headers: openRouterHeaders(),
-      body: JSON.stringify({ model, messages, ...(withTools ? { tools: oaTools } : {}) }),
+      body: JSON.stringify({ ...orModels(model), messages, ...(withTools ? { tools: oaTools } : {}) }),
       signal: AbortSignal.timeout(30_000),
     })
     if (!res.ok) return null
