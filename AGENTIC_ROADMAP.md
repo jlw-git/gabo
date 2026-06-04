@@ -21,9 +21,9 @@
 | F4 | Self-healing catalog agent | ◐ Shipped (verifier debate; discovery / self-heal / write-dedup pending) |
 | F5 | Longitudinal taste memory | ◼ Shipped (localStorage) |
 
-All ship **dark behind env flags** on PR #32 (not yet on `main`). Each was
-planned → built → tested → committed; the per-phase boxes below are ticked for
-the delivered slices, with deferred slices left open under "Out of scope" notes.
+All are now **default-on with env opt-outs** on `main`. Each was planned →
+built → tested; the per-phase boxes below are ticked for the delivered slices,
+with deferred slices left open under "Out of scope" notes.
 
 ---
 
@@ -55,9 +55,9 @@ structurally can't do: multi-turn negotiation, whole-evening reasoning, and acti
    plan instantly, refine/compose/verify asynchronously.
 4. **Irreversible actions are human-gated.** Bookings, outbound messages, calendar/
    payment writes: propose → confirm → execute. Never autonomous (see F3).
-5. **Everything is flagged and audited.** New agents ship dark behind `AGENTIC_*` env
-   flags (matching `AGENTIC_PLAN_ENABLED` / `AGENTIC_RANKER_ENABLED`) and log through
-   `lib/agents/runner.ts` → `run-log.ts` → `/admin/agents`.
+5. **Everything is flagged and audited.** Agentic surfaces are on by default, can
+   be disabled with `AGENTIC_*` env flags, and log through `lib/agents/runner.ts`
+   → `run-log.ts` → `/admin/agents`.
 
 ## Shared architecture foundation
 
@@ -196,7 +196,7 @@ Trust rules:
   not just linkout shims.
 - `runner.ts` + `run-log.ts` + `/admin/agents` = the **audit trail**: log proposed action,
   classified tier, what the user confirmed, what executed, provider response.
-- Gate the whole concierge behind `AGENTIC_BOOKING_ENABLED`; ship dark, enable per cohort.
+- Gate the whole concierge behind `AGENTIC_BOOKING_ENABLED` as an opt-out kill switch.
 
 **Phases.**
 - [x] Action-plan schema + **deterministic tier classifier** (irreversible / reversible / outward)

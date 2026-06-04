@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { agenticFlag } from '@/lib/agentic-flags'
 import { composeItinerary } from '@/lib/planner/itinerary'
 import type { PlanCard, TransitMode } from '@/lib/planner/types'
 
@@ -27,7 +28,7 @@ function parseCards(value: unknown): PlanCard[] {
 }
 
 export async function POST(request: NextRequest) {
-  if (process.env.AGENTIC_ITINERARY_ENABLED !== 'true') {
+  if (!agenticFlag(process.env.AGENTIC_ITINERARY_ENABLED)) {
     return Response.json({ error: 'not found' }, { status: 404 })
   }
 

@@ -14,6 +14,7 @@
 
 import { VERIFIER_MODEL } from '@/lib/agents/models'
 import { debateVerdict, verify, type Verdict } from '@/lib/agents/runner'
+import { agenticFlag } from '@/lib/agentic-flags'
 
 export type BlogVerifierInput = {
   // The article the extractor read. Truncated to a few thousand chars by
@@ -99,7 +100,7 @@ export async function verifyBlogExtraction(
   // scanner picks up the mode without passing anything.
   opts?: { debate?: boolean }
 ): Promise<Verdict> {
-  const debate = opts?.debate ?? process.env.AGENTIC_VERIFIER_DEBATE === 'true'
+  const debate = opts?.debate ?? agenticFlag(process.env.AGENTIC_VERIFIER_DEBATE)
   // Debate mode (F4): proposer + skeptic + deterministic tie-break. Gated so
   // the single-judge path stays the default until measured. Doubles the
   // verifier LLM calls per row when on.

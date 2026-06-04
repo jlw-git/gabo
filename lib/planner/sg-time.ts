@@ -5,8 +5,7 @@
 
 const TZ = 'Asia/Singapore'
 
-const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
-export type SgDayKey = (typeof DAY_KEYS)[number]
+export type SgDayKey = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat'
 
 const dayFmt = new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'short' })
 const timeFmt = new Intl.DateTimeFormat('en-GB', {

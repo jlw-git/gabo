@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { agenticFlag } from '@/lib/agentic-flags'
 import { verifyBlogExtraction, type BlogVerifierInput } from '@/lib/agents/verifiers/blog-extraction'
 
 // Ops endpoint: exercise the blog-extraction verifier on a supplied article +
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
 
   const verdict = await verifyBlogExtraction(input, { debate })
   return Response.json({
-    debate: debate ?? process.env.AGENTIC_VERIFIER_DEBATE === 'true',
+    debate: debate ?? agenticFlag(process.env.AGENTIC_VERIFIER_DEBATE),
     verdict,
   })
 }

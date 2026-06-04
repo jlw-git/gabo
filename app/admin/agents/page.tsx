@@ -13,6 +13,7 @@
 
 import { headers } from 'next/headers'
 import { loadRecentRuns, type AgentRunRow, type RunKind } from '@/lib/agents/run-log'
+import { agenticFlag } from '@/lib/agentic-flags'
 
 export const dynamic = 'force-dynamic'
 
@@ -186,8 +187,8 @@ function PlanMetaPanel({ meta }: { meta: PlanMetaSnapshot | null }) {
       <h2 className="text-lg font-semibold">Last plan meta sample</h2>
       <p className="mt-1 text-xs text-stone-500">
         Submitted to <code>/api/plan</code> at page load with a fixture payload. Flag state:
-        AGENTIC_PLAN_ENABLED={String(process.env.AGENTIC_PLAN_ENABLED === 'true')} ·
-        AGENTIC_RANKER_ENABLED={String(process.env.AGENTIC_RANKER_ENABLED === 'true')}
+        AGENTIC_PLAN_ENABLED={String(agenticFlag(process.env.AGENTIC_PLAN_ENABLED))} ·
+        AGENTIC_RANKER_ENABLED={String(agenticFlag(process.env.AGENTIC_RANKER_ENABLED))}
       </p>
 
       <dl className="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">

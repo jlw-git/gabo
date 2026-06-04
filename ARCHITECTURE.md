@@ -99,9 +99,10 @@ in `lib/agents/models.ts`; every agent call wrapped by `lib/agents/runner.ts`
 - **Latency floor = the fast deterministic plan.** Agents stay off the hot path:
   refine and itinerary are user-triggered, taste enrich is a cheap pre-pass,
   verifier debate is cron-side. *Why: the 60-second promise dies under synchronous agent loops.*
-- **Everything ships dark, flagged + audited.** New agentic surfaces gate behind
-  `AGENTIC_*` env flags (server) and/or `NEXT_PUBLIC_AGENTIC_*` (client); cron
-  agents log via `recordRun`. *Why: safe rollout + cost control (debate/loops cost more).*
+- **Agentic is default-on, flagged + audited.** Agentic surfaces can still be
+  disabled with `AGENTIC_*` env flags (server) and/or `NEXT_PUBLIC_AGENTIC_*`
+  (client); cron agents log via `recordRun`. *Why: full product by default,
+  explicit opt-out for cost/control-sensitive environments.*
 - **No simulation, no fixtures.** No fabricated data, no demo-disclosure surfaces,
   no fixture names ("You"/"Partner" fallbacks only). *Why: the product presents as real.*
 - **OneMap, post-hackathon.** GrabMaps was retired; OneMap powers all
@@ -125,9 +126,8 @@ in `lib/agents/models.ts`; every agent call wrapped by `lib/agents/runner.ts`
 | **F3** | Action **tiers deterministic** (irreversible / reversible / outward) | Code decides what needs a human gate; confirm the real payload; edit-before-send; audit-logged. |
 
 ### Git / delivery
-Features ship dark on `feat/f1-conversational-planner` (PR #32); docs refresh +
-this roadmap live on PR #31. Main is untouched until merged. The F1 commit
-bundled pre-existing relaxation/diagnostics WIP that shared the same files.
+The agentic layer is now a first-class mainline surface. Flags remain as
+environment-level opt-outs, but unset flags mean the full Gabo experience is on.
 
 ---
 
@@ -147,7 +147,7 @@ bundled pre-existing relaxation/diagnostics WIP that shared the same files.
   velocity signal; trending = Reddit mentions × internal velocity (weekly cron).
 - **Handoff** — editable WhatsApp/iMessage share text.
 
-### Agentic (flag-gated, ship dark)
+### Agentic (default-on, flag opt-out)
 - **F1 · Conversational refine** — "Tweak this plan" on results: *"more romantic,
   less loud"*, *"closer to her side"*, *"cheaper"* → re-planned in place with a
   one-line reply. `AGENTIC_CHAT_ENABLED` + `NEXT_PUBLIC_AGENTIC_CHAT_ENABLED`.

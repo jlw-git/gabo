@@ -24,9 +24,10 @@ import { RefineBar, type ChatTurn, type RefineResult } from './RefineBar'
 import { ItineraryView } from './ItineraryView'
 import type { Itinerary } from '@/lib/planner/itinerary'
 import type { PlanRequest } from '@/lib/planner/request-validation'
+import { agenticFlag } from '@/lib/agentic-flags'
 
-const ITINERARY_ENABLED = process.env.NEXT_PUBLIC_AGENTIC_ITINERARY_ENABLED === 'true'
-const TASTE_ENABLED = process.env.NEXT_PUBLIC_AGENTIC_TASTE_ENABLED === 'true'
+const ITINERARY_ENABLED = agenticFlag(process.env.NEXT_PUBLIC_AGENTIC_ITINERARY_ENABLED)
+const TASTE_ENABLED = agenticFlag(process.env.NEXT_PUBLIC_AGENTIC_TASTE_ENABLED)
 
 export type Buckets = {
   dining: PlanCardType[]
@@ -110,7 +111,13 @@ export function ResultsView({
 
   // Hydrate shortlist from localStorage once on mount.
   useEffect(() => {
-    setShortlist(new Set(loadShortlist()))
+    let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled) setShortlist(new Set(loadShortlist()))
+    })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   function toggleShortlist(card: PlanCardType) {
@@ -187,14 +194,8 @@ export function ResultsView({
 
   // F5: drop "Not for us" cards from every downstream view (lists, counts, map,
   // ETA toggle) so a skip removes the card everywhere at once.
-  const visibleDining = useMemo(
-    () => buckets.dining.filter((c) => !skipped.has(c.id)),
-    [buckets.dining, skipped]
-  )
-  const visibleEvents = useMemo(
-    () => buckets.events.filter((c) => !skipped.has(c.id)),
-    [buckets.events, skipped]
-  )
+  const visibleDining = buckets.dining.filter((c) => !skipped.has(c.id))
+  const visibleEvents = buckets.events.filter((c) => !skipped.has(c.id))
 
   const allCards = useMemo(
     () => [...visibleDining, ...visibleEvents],

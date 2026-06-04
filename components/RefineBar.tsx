@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { loadShortlist } from '@/lib/shortlist-storage'
 import type { PlanRequest } from '@/lib/planner/request-validation'
 import type { Buckets } from './ResultsView'
+import { agenticFlag } from '@/lib/agentic-flags'
 
 // Client-safe mirror of the agent's turn shape (kept local so we don't import
 // the server-side conversation module into a client component).
@@ -21,14 +22,14 @@ type Props = {
   onRefined: (userMessage: string, result: RefineResult) => void
 }
 
-const ENABLED = process.env.NEXT_PUBLIC_AGENTIC_CHAT_ENABLED === 'true'
+const ENABLED = agenticFlag(process.env.NEXT_PUBLIC_AGENTIC_CHAT_ENABLED)
 
 export function RefineBar({ request, chat, onRefined }: Props) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Ships dark — render nothing unless the client flag is on.
+  // Opt-out flag: render nothing only when the client flag is explicitly off.
   if (!ENABLED) return null
 
   async function submit(e: React.FormEvent) {

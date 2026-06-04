@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { PlanDateForm } from '@/components/PlanDateForm'
+import { PlanDateForm, type PlanQualityPatch } from '@/components/PlanDateForm'
 import { RecommendationsFeed } from '@/components/RecommendationsFeed'
 import { ResultsView, type Buckets } from '@/components/ResultsView'
 import { ChatPanel } from '@/components/ChatPanel'
@@ -24,14 +24,15 @@ import {
   tasteNarrationPayload,
   tasteSummary,
 } from '@/lib/taste-memory'
-import type { LatLng } from '@/lib/planner/types'
+import type { LatLng, Profile } from '@/lib/planner/types'
+import { agenticFlag } from '@/lib/agentic-flags'
 
-const TASTE_ENABLED = process.env.NEXT_PUBLIC_AGENTIC_TASTE_ENABLED === 'true'
+const TASTE_ENABLED = agenticFlag(process.env.NEXT_PUBLIC_AGENTIC_TASTE_ENABLED)
 // LLM-narrated hint (F5 flesh-out). When off, the hint stays the deterministic
 // templated summary and nothing leaves the device.
 const TASTE_NARRATE_ENABLED =
-  process.env.NEXT_PUBLIC_AGENTIC_TASTE_NARRATE_ENABLED === 'true'
-const CHAT_ENABLED = process.env.NEXT_PUBLIC_AGENTIC_CHAT_ENABLED === 'true'
+  agenticFlag(process.env.NEXT_PUBLIC_AGENTIC_TASTE_NARRATE_ENABLED)
+const CHAT_ENABLED = agenticFlag(process.env.NEXT_PUBLIC_AGENTIC_CHAT_ENABLED)
 
 type Diagnostics = {
   candidatesTotal: number
@@ -97,6 +98,7 @@ export default function Home() {
     override_tags: string[]
     startADetails: PlaceSelection | null
     startBDetails: PlaceSelection | null
+    profilePatch: PlanQualityPatch
     freeform: string
   }) {
     if (!stored) return
@@ -112,7 +114,7 @@ export default function Home() {
     // to extract structured slots before we hit the planner. Triage carries
     // its own timeout + graceful fallback in the route handler, so a
     // failure here cleanly degrades to "submit what the form gave us."
-    let mergedProfile = stored.profile
+    let mergedProfile = mergeProfilePatch(stored.profile, payload.profilePatch)
     let mergedStartA: LatLng | null = payload.start_a
     let mergedStartB: LatLng | null = payload.start_b
     let mergedOverrides = payload.override_tags
@@ -124,7 +126,7 @@ export default function Home() {
           body: JSON.stringify({
             freeform: payload.freeform,
             partial: {
-              profile: stored.profile,
+              profile: mergedProfile,
               start_a: payload.start_a,
               start_b: payload.start_b,
               override_tags: payload.override_tags,
@@ -195,7 +197,7 @@ export default function Home() {
         kind: 'results',
         buckets: data.buckets ?? { dining: [], events: [] },
         scheduledFor: new Date(payload.scheduled_for),
-        overrideTags: payload.override_tags,
+        overrideTags: mergedOverrides,
         startA: payload.startADetails,
         startB: payload.startBDetails,
         weather: data.meta?.weather ?? null,
@@ -340,6 +342,19 @@ export default function Home() {
   )
 }
 
+function mergeProfilePatch(profile: Profile, patch: PlanQualityPatch): Profile {
+  const avoided = new Set([...profile.cuisines_avoided, ...patch.cuisines_avoided])
+  const loved = [...profile.cuisines_loved, ...patch.cuisines_loved].filter((c) => !avoided.has(c))
+
+  return {
+    ...profile,
+    cuisines_loved: [...new Set(loved)],
+    cuisines_avoided: [...avoided],
+    vibe_defaults: [...new Set([...profile.vibe_defaults, ...patch.vibe_defaults])],
+    budget_bands: [...new Set([...profile.budget_bands, ...patch.budget_bands])],
+  }
+}
+
 // F5: explainable taste hint. Reads the local taste log (client-only; this
 // block renders post-hydration so there's no SSR mismatch) and shows the
 // inferred leaning. Renders nothing below the signal floor.
@@ -352,27 +367,30 @@ function TasteHint() {
   const [summary, setSummary] = useState<string | null>(null)
 
   useEffect(() => {
-    const aff = computeTasteAffinity(loadTasteEvents(), Date.now())
-    const templated = tasteSummary(aff)
-    setSummary(templated)
-    if (!templated || !TASTE_NARRATE_ENABLED) return
-
-    const payload = tasteNarrationPayload(aff)
-    if (!payload) return
-
     let cancelled = false
-    fetch('/api/taste/narrate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+    queueMicrotask(() => {
+      if (cancelled) return
+      const aff = computeTasteAffinity(loadTasteEvents(), Date.now())
+      const templated = tasteSummary(aff)
+      setSummary(templated)
+      if (!templated || !TASTE_NARRATE_ENABLED) return
+
+      const payload = tasteNarrationPayload(aff)
+      if (!payload) return
+
+      fetch('/api/taste/narrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { narration?: string | null } | null) => {
+          if (!cancelled && data?.narration) setSummary(data.narration)
+        })
+        .catch(() => {
+          /* keep the templated summary */
+        })
     })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { narration?: string | null } | null) => {
-        if (!cancelled && data?.narration) setSummary(data.narration)
-      })
-      .catch(() => {
-        /* keep the templated summary */
-      })
     return () => {
       cancelled = true
     }
