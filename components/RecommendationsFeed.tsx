@@ -64,8 +64,10 @@ export function RecommendationsFeed({ profile }: Props) {
   const [shortlist, setShortlist] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    setShortlist(new Set(loadShortlist()))
     let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled) setShortlist(new Set(loadShortlist()))
+    })
     fetch('/api/recommendations')
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)

@@ -1,8 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import type { Override } from '@/lib/planner/types'
+import type { Override, Profile, VibeTag } from '@/lib/planner/types'
 import { PlaceSearchInput, type PlaceSelection } from './PlaceSearchInput'
+
+export type PlanQualityPatch = Pick<
+  Profile,
+  'cuisines_loved' | 'cuisines_avoided' | 'vibe_defaults' | 'budget_bands'
+>
 
 type Props = {
   onSubmit: (payload: {
@@ -12,6 +17,7 @@ type Props = {
     override_tags: string[]
     startADetails: PlaceSelection | null
     startBDetails: PlaceSelection | null
+    profilePatch: PlanQualityPatch
     // Optional free-text description. When set, the page handler runs the
     // triage agent (/api/plan/triage) to enrich profile / start points /
     // override_tags before calling /api/plan. Empty string means no triage.
@@ -29,6 +35,73 @@ const OCCASION_CHIPS: { tag: Override; label: string }[] = [
   { tag: 'birthday', label: 'Birthday' },
 ]
 
+const INTENT_PRESETS: {
+  key: string
+  label: string
+  hint: string
+  cuisines: string[]
+  vibes: VibeTag[]
+  budgets: number[]
+}[] = [
+  {
+    key: 'dinner_event',
+    label: 'Dinner + event',
+    hint: 'Balanced shortlist for a whole evening.',
+    cuisines: ['modern_european', 'cocktail'],
+    vibes: ['celebratory', 'adventurous'],
+    budgets: [],
+  },
+  {
+    key: 'special_dinner',
+    label: 'Special dinner',
+    hint: 'Polished, reservation-worthy places.',
+    cuisines: ['modern_european', 'french', 'omakase'],
+    vibes: ['celebratory', 'cozy'],
+    budgets: [3, 4],
+  },
+  {
+    key: 'new_buzzy',
+    label: 'New or buzzy',
+    hint: 'Recent openings, pop-ups, critic picks.',
+    cuisines: ['cocktail', 'bar', 'dessert'],
+    vibes: ['adventurous', 'celebratory'],
+    budgets: [],
+  },
+  {
+    key: 'easy_quality',
+    label: 'Easy but good',
+    hint: 'Comfortable, lower-friction picks.',
+    cuisines: ['japanese', 'italian', 'cafe'],
+    vibes: ['cozy', 'low_key'],
+    budgets: [2, 3],
+  },
+]
+
+const CUISINE_CHIPS = [
+  { value: 'japanese', label: 'Japanese' },
+  { value: 'italian', label: 'Italian' },
+  { value: 'modern_european', label: 'Modern European' },
+  { value: 'omakase', label: 'Omakase' },
+  { value: 'cocktail', label: 'Cocktails' },
+  { value: 'dessert', label: 'Dessert' },
+  { value: 'cafe', label: 'Cafe' },
+  { value: 'seafood', label: 'Seafood' },
+]
+
+const VIBE_CHIPS: { value: VibeTag; label: string }[] = [
+  { value: 'cozy', label: 'Cozy' },
+  { value: 'adventurous', label: 'Adventurous' },
+  { value: 'celebratory', label: 'Celebratory' },
+  { value: 'low_key', label: 'Low-key' },
+]
+
+const BUDGET_CHIPS = [
+  { value: 1, label: '$' },
+  { value: 2, label: '$$' },
+  { value: 3, label: '$$$' },
+  { value: 4, label: '$$$$' },
+]
+
 export function PlanDateForm({
   onSubmit,
   disabled,
@@ -42,6 +115,11 @@ export function PlanDateForm({
   const [time, setTime] = useState(defaultDateTime())
   const [occasion, setOccasion] = useState<Override[]>([])
   const [customOccasion, setCustomOccasion] = useState('')
+  const [intent, setIntent] = useState(INTENT_PRESETS[0].key)
+  const [cuisines, setCuisines] = useState<string[]>([])
+  const [vibes, setVibes] = useState<VibeTag[]>([])
+  const [budgets, setBudgets] = useState<number[]>([])
+  const [avoids, setAvoids] = useState('')
   const [moreOpen, setMoreOpen] = useState(false)
   const [freeformOpen, setFreeformOpen] = useState(false)
   const [freeform, setFreeform] = useState('')
@@ -52,11 +130,20 @@ export function PlanDateForm({
     setOccasion((cur) => (cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag]))
   }
 
+  function toggleList<T>(value: T, setList: React.Dispatch<React.SetStateAction<T[]>>) {
+    setList((cur) => (cur.includes(value) ? cur.filter((item) => item !== value) : [...cur, value]))
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!canSubmit) return
     const custom = customOccasion.trim()
     const override_tags: string[] = [...occasion, ...(custom ? [custom] : [])]
+    const preset = INTENT_PRESETS.find((p) => p.key === intent) ?? INTENT_PRESETS[0]
+    const avoided = avoids
+      .split(',')
+      .map((item) => item.trim().toLowerCase().replace(/\s+/g, '_'))
+      .filter(Boolean)
     onSubmit({
       start_a: youStart ? { lat: youStart.lat, lng: youStart.lng } : null,
       start_b: partnerStart ? { lat: partnerStart.lat, lng: partnerStart.lng } : null,
@@ -64,6 +151,12 @@ export function PlanDateForm({
       override_tags,
       startADetails: youStart,
       startBDetails: partnerStart,
+      profilePatch: {
+        cuisines_loved: [...new Set([...preset.cuisines, ...cuisines])],
+        cuisines_avoided: [...new Set(avoided)],
+        vibe_defaults: [...new Set([...preset.vibes, ...vibes])],
+        budget_bands: [...new Set([...preset.budgets, ...budgets])],
+      },
       freeform: freeform.trim(),
     })
   }
@@ -132,6 +225,129 @@ export function PlanDateForm({
             We&rsquo;ll favour spots roughly midway between you both.
           </p>
         )}
+
+        <div className="mt-5 border-t border-stone-100 pt-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold tracking-tight text-stone-900">Quality brief</h2>
+              <p className="text-xs text-stone-500">A few signals help Gabo rank the dining and event mix.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIntent(INTENT_PRESETS[0].key)
+                setCuisines([])
+                setVibes([])
+                setBudgets([])
+                setAvoids('')
+              }}
+              className="self-start rounded-full px-2 py-1 text-xs font-medium text-stone-500 hover:text-stone-800 sm:self-auto"
+            >
+              Reset
+            </button>
+          </div>
+
+          <div className="mt-3 grid gap-2 md:grid-cols-4">
+            {INTENT_PRESETS.map((preset) => {
+              const on = intent === preset.key
+              return (
+                <button
+                  key={preset.key}
+                  type="button"
+                  onClick={() => setIntent(preset.key)}
+                  className={`rounded-xl p-3 text-left ring-1 transition ${
+                    on
+                      ? 'bg-stone-900 text-white ring-stone-900'
+                      : 'bg-stone-50 text-stone-700 ring-stone-200 hover:bg-white'
+                  }`}
+                  aria-pressed={on}
+                >
+                  <span className="block text-sm font-semibold">{preset.label}</span>
+                  <span className={`mt-1 block text-xs leading-snug ${on ? 'text-stone-200' : 'text-stone-500'}`}>
+                    {preset.hint}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-[1.15fr_1fr]">
+            <div>
+              <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-stone-500">
+                Dining priorities
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {CUISINE_CHIPS.map((chip) => {
+                  const on = cuisines.includes(chip.value)
+                  return (
+                    <ChipButton
+                      key={chip.value}
+                      selected={on}
+                      onClick={() => toggleList(chip.value, setCuisines)}
+                    >
+                      {chip.label}
+                    </ChipButton>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-stone-500">
+                Mood
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {VIBE_CHIPS.map((chip) => {
+                  const on = vibes.includes(chip.value)
+                  return (
+                    <ChipButton
+                      key={chip.value}
+                      selected={on}
+                      onClick={() => toggleList(chip.value, setVibes)}
+                    >
+                      {chip.label}
+                    </ChipButton>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-[minmax(180px,0.55fr)_1fr] md:items-end">
+            <div>
+              <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-stone-500">
+                Budget comfort
+              </p>
+              <div className="flex gap-2">
+                {BUDGET_CHIPS.map((chip) => {
+                  const on = budgets.includes(chip.value)
+                  return (
+                    <ChipButton
+                      key={chip.value}
+                      selected={on}
+                      onClick={() => toggleList(chip.value, setBudgets)}
+                    >
+                      {chip.label}
+                    </ChipButton>
+                  )
+                })}
+              </div>
+            </div>
+            <label className="block">
+              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-stone-500">
+                Avoid
+              </span>
+              <input
+                type="text"
+                value={avoids}
+                onChange={(e) => setAvoids(e.target.value)}
+                placeholder="seafood, bar, omakase..."
+                maxLength={90}
+                className="h-10 w-full rounded-xl bg-stone-50 px-3 text-sm ring-1 ring-stone-200 placeholder:text-stone-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-300"
+              />
+            </label>
+          </div>
+        </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
@@ -232,6 +448,31 @@ function Field({
       )}
       {children}
     </div>
+  )
+}
+
+function ChipButton({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+        selected
+          ? 'bg-rose-50 text-rose-700 ring-rose-300'
+          : 'bg-white text-stone-700 ring-stone-200 hover:bg-stone-50'
+      }`}
+      aria-pressed={selected}
+    >
+      {children}
+    </button>
   )
 }
 

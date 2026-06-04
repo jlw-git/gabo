@@ -3,6 +3,7 @@ import {
   runConversationTurn,
   type ConversationTurn,
 } from '@/lib/agents/conversation'
+import { agenticFlag } from '@/lib/agentic-flags'
 import { parsePlanRequest } from '@/lib/planner/request-validation'
 
 // Conversational refine endpoint (F1). The client sends the current PlanRequest
@@ -12,11 +13,11 @@ import { parsePlanRequest } from '@/lib/planner/request-validation'
 // Body: { message: string, history?: ConversationTurn[], request: PlanRequest, shortlist_ids?: string[] }
 // Returns: { assistantMessage, request, buckets, meta }
 //
-// Gated by AGENTIC_CHAT_ENABLED — ships dark. Never throws on agent failure;
+// Gated by AGENTIC_CHAT_ENABLED as an opt-out kill switch. Never throws on agent failure;
 // the agent itself degrades to unchanged results with a friendly message.
 
 export async function POST(request: NextRequest) {
-  if (process.env.AGENTIC_CHAT_ENABLED !== 'true') {
+  if (!agenticFlag(process.env.AGENTIC_CHAT_ENABLED)) {
     return Response.json({ error: 'not found' }, { status: 404 })
   }
 

@@ -1,5 +1,6 @@
 import { decideRelaxation, MIN_HEALTHY_RESULTS } from '@/lib/agents/relaxation'
 import { rerankBuckets } from '@/lib/agents/ranker'
+import { agenticFlag } from '@/lib/agentic-flags'
 import { mapWithConcurrency } from '@/lib/async/pool'
 import { fetchDriveRoute, type DriveRouteResult } from '@/lib/onemap/client'
 import { evaluateCandidates } from '@/lib/planner/gemini-eval'
@@ -115,6 +116,12 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
     getDirection
   )
   let { ranked, cachedLegs } = routeResult
+  if (needsRouting && routeResult.attempted > 0 && routeResult.failed === routeResult.attempted) {
+    throw new PlanDateError(
+      'Routing service unavailable — unable to score candidate travel times',
+      502
+    )
+  }
   let buckets = bucketByCategory(ranked)
 
   // Search relaxation. Two layers when a bucket comes back thin:
@@ -162,7 +169,7 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
   // relaxation without the ranker and vice versa.
   let rerankedDining = 0
   let rerankedEvents = 0
-  if (process.env.AGENTIC_RANKER_ENABLED === 'true') {
+  if (agenticFlag(process.env.AGENTIC_RANKER_ENABLED)) {
     const out = await rerankBuckets(buckets, profile, weather, scheduledDate, request.override_tags)
     buckets = out.buckets
     rerankedDining = out.reranked_dining
@@ -201,6 +208,7 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
       candidates_total: venues.length,
       after_local_filters: candidates.length,
       routed: ranked.length,
+      routing_failed: routeResult.failed,
       candidate_cap: ROUTING_CANDIDATE_CAP,
       routing_concurrency: ROUTING_CONCURRENCY,
       cached_legs: cachedLegs,
@@ -232,11 +240,14 @@ async function routeAndScore(
   startA: LatLng | null,
   startB: LatLng | null,
   getDirection: (origin: LatLng, destination: LatLng) => Promise<DriveRouteResult>
-): Promise<{ ranked: RankedVenue[]; cachedLegs: number }> {
+): Promise<{ ranked: RankedVenue[]; cachedLegs: number; attempted: number; failed: number }> {
   let cachedLegs = 0
+  let attempted = 0
+  let failed = 0
   const routed = await mapWithConcurrency(venues, ROUTING_CONCURRENCY, async (venue) => {
     try {
       if (startA && startB) {
+        attempted += 1
         const [a, b] = await Promise.all([
           getDirection(startA, { lat: venue.lat, lng: venue.lng }),
           getDirection(startB, { lat: venue.lat, lng: venue.lng }),
@@ -252,6 +263,7 @@ async function routeAndScore(
         )
       }
       if (startA || startB) {
+        attempted += 1
         const start = (startA ?? startB) as LatLng
         const a = await getDirection(start, { lat: venue.lat, lng: venue.lng })
         if (a.cached) cachedLegs++
@@ -265,6 +277,7 @@ async function routeAndScore(
       // No start points — islandwide search.
       return scoreWithoutEtas(venue, profile, overrideTags)
     } catch (err) {
+      failed += 1
       // Per-venue routing failures used to be silent; if every venue fails
       // (e.g. OneMap auth misconfigured) the whole plan returns 0 cards
       // with no signal. Log to Vercel Functions logs so the next breakage
@@ -277,7 +290,7 @@ async function routeAndScore(
     }
   })
   const ranked = routed.filter((r): r is NonNullable<typeof r> => r !== null)
-  return { ranked, cachedLegs }
+  return { ranked, cachedLegs, attempted, failed }
 }
 
 // Relaxation pass. Called only when at least one bucket came back below
@@ -436,7 +449,7 @@ async function relaxAndRetry(deps: RelaxAndRetryDeps): Promise<{
   // helped, AND the env flag is on. Per-bucket asks so dining can relax
   // cuisine while events relaxes distance, etc. decideRelaxation enforces
   // its own prefilter floor before issuing the model call.
-  if (process.env.AGENTIC_PLAN_ENABLED !== 'true') return null
+  if (!agenticFlag(process.env.AGENTIC_PLAN_ENABLED)) return null
   const decisions = await Promise.all(
     thin.map(async (bucket) => ({
       bucket,
@@ -514,7 +527,13 @@ function bucketWithoutEtaCap(ranked: RankedVenue[]): Buckets {
 }
 
 async function loadVenuesWithFallback(profile: Profile, overrides: string[]): Promise<VenueLoadResult> {
-  return { venues: await loadFromSupabase(profile, overrides), source: 'supabase' }
+  try {
+    return { venues: await loadFromSupabase(profile, overrides), source: 'supabase' }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown supabase error'
+    console.error('[plan] supabase venue load failed:', message)
+    throw new PlanDateError('Venue catalog unavailable — please try again shortly', 502)
+  }
 }
 
 async function loadFromSupabase(profile: Profile, overrides: string[]): Promise<Venue[]> {

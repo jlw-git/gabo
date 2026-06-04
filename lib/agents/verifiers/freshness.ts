@@ -16,6 +16,7 @@
 
 import { VERIFIER_MODEL } from '@/lib/agents/models'
 import { debateVerdict, verify, type Verdict } from '@/lib/agents/runner'
+import { agenticFlag } from '@/lib/agentic-flags'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 
 const MAX_VENUES_PER_RUN = 50
@@ -90,7 +91,7 @@ ${VERDICT_JSON}`
 
 async function checkOne(row: FreshnessRow): Promise<Verdict> {
   // Debate mode (F4): grounded proposer + skeptic + deterministic tie-break.
-  if (process.env.AGENTIC_VERIFIER_DEBATE === 'true') {
+  if (agenticFlag(process.env.AGENTIC_VERIFIER_DEBATE)) {
     return debateVerdict({
       proposerPrompt: proposerPrompt(row),
       skepticPrompt: skepticPrompt(row),

@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { chatComplete } from '@/lib/agents/provider'
 import { COPY_MODEL } from '@/lib/agents/models'
 import { recordRun } from '@/lib/agents/run-log'
+import { agenticFlag } from '@/lib/agentic-flags'
 
 // LLM-narrated taste explanation (F5 flesh-out). The client computes its taste
 // model entirely on-device and sends only the AGGREGATED top tags (the same ones
@@ -9,8 +10,8 @@ import { recordRun } from '@/lib/agents/run-log'
 // timestamps, or venue identity. We reword them into one warm, specific line.
 //
 // Privacy: this is the single place a taste summary leaves the device, and only
-// when AGENTIC_TASTE_NARRATE_ENABLED is set. Default-dark keeps F5's local-first
-// posture intact; with the flag off the client renders the deterministic hint.
+// unless AGENTIC_TASTE_NARRATE_ENABLED is explicitly off. The client still
+// renders the deterministic hint when narration is disabled or unavailable.
 //
 // Body: { loved: string[], vibes: string[], easingOff: string[] }
 // Returns: { narration: string | null } — null on any failure so the client
@@ -53,7 +54,7 @@ function buildPrompt(loved: string[], vibes: string[], easingOff: string[]): str
 }
 
 export async function POST(request: NextRequest) {
-  if (process.env.AGENTIC_TASTE_NARRATE_ENABLED !== 'true') {
+  if (!agenticFlag(process.env.AGENTIC_TASTE_NARRATE_ENABLED)) {
     return Response.json({ error: 'not found' }, { status: 404 })
   }
 

@@ -101,7 +101,7 @@ The legacy 53-venue hand-seeded catalog has been retired. The catalog now grows 
 
 Gabo is a **deterministic planner with LLM help at the seams**, not an agentic system despite the `lib/agents/` folder name. The user-visible decision — *which* venues appear and *in what order* — is pure rules-based code; no LLM scores or ranks venues in the default configuration. Every LLM call is **Gemini** (no Claude/Anthropic in the runtime). The model tier per task is centralised in `lib/agents/models.ts` (extraction → `gemini-2.5-flash`; verify / copy / triage / rank / orchestration → `gemini-2.5-flash-lite` / `flash`); every call is wrapped by `lib/agents/runner.ts` for observability (`/admin/agents`).
 
-The **base app** has **9 LLM touchpoints + a triage step**, all single-shot. The only ones that reach outside their prompt use Gemini **with Google Search grounding** (museum discovery + the verifiers) and run exclusively in cron ingestion — never on a user's plan request. The flag-gated **agentic features (F1–F5)** add the first looping/multi-call touchpoints (a bounded tool-use loop in F1, a 2-call debate in F4); they ship **dark** and still keep every user-visible decision in deterministic code (see the F-series table below).
+The **base app** has **9 LLM touchpoints + a triage step**, all single-shot. The only ones that reach outside their prompt use Gemini **with Google Search grounding** (museum discovery + the verifiers) and run exclusively in cron ingestion — never on a user's plan request. The **agentic features (F1–F5)** add the first looping/multi-call touchpoints (a bounded tool-use loop in F1, a 2-call debate in F4); they are **default-on with explicit env opt-outs** and still keep every user-visible decision in deterministic code (see the F-series table below).
 
 **Cron ingestion — LLM-driven (off the request path):**
 
@@ -125,7 +125,7 @@ The **base app** has **9 LLM touchpoints + a triage step**, all single-shot. The
 | **Tolerance-band ranker** | flash-lite | Suggests a reorder within a bucket (`lib/agents/ranker.ts`) | **Gated by `AGENTIC_RANKER_ENABLED`**; LLM only *suggests* — deterministic clamp (±3 positions, #1 can't fall below #3) decides |
 | **Per-venue reasoning copy** | flash-lite | Generates the "why this fits you" line per card from profile + venue signals (`lib/planner/gemini-eval.ts`) | Always on for top ~10 cards; 8s timeout + empty-map fallback, non-blocking |
 
-**Agentic features (F1–F5) — flag-gated, ship dark:**
+**Agentic features (F1–F5) — default-on, flag opt-out:**
 
 Each keeps the user-visible decision (scoring, feasibility, keep/drop, action tiers) in deterministic code; the LLM is confined to interpretation, argument, or prose. See [AGENTIC_ROADMAP.md](AGENTIC_ROADMAP.md) for status + follow-ups and [ARCHITECTURE.md](ARCHITECTURE.md) for the decision rationale.
 
@@ -368,7 +368,7 @@ working `Profile` for that plan. Effect: venues sharing tags with the
 user's shortlist get the same `matchScore` boost as their explicit
 preferences. Cuisines that the user has explicitly avoided are not added.
 
-### 10.1 Longitudinal taste memory (F5, flag-gated, ship-dark)
+### 10.1 Longitudinal Taste Memory (F5, Default-On, Flag Opt-Out)
 
 Beyond the stateless shortlist affinity above, the taste model
 (`lib/taste-memory.ts`, gated by `NEXT_PUBLIC_AGENTIC_TASTE_ENABLED`) keeps a

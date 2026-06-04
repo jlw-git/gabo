@@ -6,6 +6,7 @@ import { isEvent } from '@/lib/planner/category'
 import { buildActionPlan, type ActionTier } from '@/lib/booking/action-plan'
 import { recordBooking } from '@/lib/booking/booking-log'
 import { googleCalendarUrl } from '@/lib/calendar'
+import { agenticFlag } from '@/lib/agentic-flags'
 
 type Props = {
   card: PlanCardType
@@ -15,7 +16,7 @@ type Props = {
   onClose: () => void
 }
 
-const BOOKING_GATE = process.env.NEXT_PUBLIC_AGENTIC_BOOKING_ENABLED === 'true'
+const BOOKING_GATE = agenticFlag(process.env.NEXT_PUBLIC_AGENTIC_BOOKING_ENABLED)
 
 // Confirmation sheet. For dining, "Reserve" → opens the venue's Chope listing.
 // For events, "Get tickets" → opens the official event page (catalog

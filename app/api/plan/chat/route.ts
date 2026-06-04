@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { runIntakeTurn, type ConversationTurn } from '@/lib/agents/conversation'
+import { agenticFlag } from '@/lib/agentic-flags'
 import { parsePlanRequest, type PlanRequest } from '@/lib/planner/request-validation'
 
 // Chat-first intake (F1 flesh-out). Streams progress as Server-Sent Events while
@@ -24,7 +25,7 @@ function parseDraft(raw: unknown): PlanRequest | null {
 }
 
 export async function POST(request: NextRequest) {
-  if (process.env.AGENTIC_CHAT_ENABLED !== 'true') {
+  if (!agenticFlag(process.env.AGENTIC_CHAT_ENABLED)) {
     return Response.json({ error: 'not found' }, { status: 404 })
   }
 

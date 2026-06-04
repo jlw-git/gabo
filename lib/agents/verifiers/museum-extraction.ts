@@ -12,6 +12,7 @@
 import * as cheerio from 'cheerio'
 import { VERIFIER_MODEL } from '@/lib/agents/models'
 import { debateVerdict, verify, type Verdict } from '@/lib/agents/runner'
+import { agenticFlag } from '@/lib/agentic-flags'
 
 export type MuseumVerifierInput = {
   museumName: string
@@ -144,7 +145,7 @@ ${VERDICT_JSON}`
 }
 
 export async function verifyMuseumExhibition(input: MuseumVerifierInput): Promise<Verdict> {
-  const debate = process.env.AGENTIC_VERIFIER_DEBATE === 'true'
+  const debate = agenticFlag(process.env.AGENTIC_VERIFIER_DEBATE)
   const pageText = await fetchPageText(input.exhibition.source_url)
 
   // Page fetch failed → search-grounded check (riskier; both roles run grounded).
