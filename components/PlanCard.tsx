@@ -57,10 +57,12 @@ export function PlanCard({
 }: Props) {
   const event = isEvent(card)
   const labels = badgeLabels(card)
+  const sourceSummary =
+    event && typeof card.badge_meta?.summary === 'string' ? card.badge_meta.summary.trim() : ''
   // Prefer LLM-written body copy when the planner enriched this card
   // (lib/planner/gemini-eval.ts). Falls back to the formula composer
   // when the Gemini call timed out, errored, or didn't return this id.
-  const whyForThem = card.why ?? composeWhy(card, profile, labels)
+  const whyForThem = sourceSummary || (card.why ?? composeWhy(card, profile, labels))
   const showFairness = card.eta_a_min > 0 || card.eta_b_min > 0
   const showTrending =
     !labels.some((l) => l.key === 'closing_soon') && card.trending_score >= TRENDING_THRESHOLD
@@ -333,6 +335,9 @@ function badgeLabels(card: PlanCardType): CardLabel[] {
 
 function composeWhy(card: PlanCardType, profile: Profile, labels: CardLabel[]): string {
   const event = isEvent(card)
+  const summary = typeof card.badge_meta?.summary === 'string' ? card.badge_meta.summary.trim() : ''
+  if (event && summary) return summary
+
   const lovedHit = card.cuisine_tags.find((c) => profile.cuisines_loved.includes(c))
   const vibes = profile.vibe_defaults ?? []
   const vibeHit = card.vibe_tags.find((v) => (vibes as string[]).includes(v))

@@ -1,10 +1,11 @@
 // The Smart Local events scraper.
 //
 // TSL is a WordPress site exposing the standard wp-json REST API. We pull
-// recent posts from the "Things To Do" category (id 13620), feed each
-// article HTML through Gemini Flash with an event-extraction prompt, and
-// keep only articles that yield a date-bounded event with a concrete
-// venue address (skipping listicles, ongoing-attraction reviews, etc.).
+// recent posts from the "Things To Do" category and its "Events" child
+// category, feed each article HTML through Gemini Flash with an
+// event-extraction prompt, and keep only articles that yield a date-bounded
+// event with a concrete venue address (skipping generic roundups,
+// ongoing-attraction reviews, etc.).
 //
 // Honesty contract:
 //   - source_url MUST be the official TSL article URL.
@@ -39,11 +40,27 @@ const DEFAULT_EVENT_HOURS: HoursJson = {
 const TSL_BASE = 'https://thesmartlocal.com'
 // "Things To Do" category — confirmed via /wp-json/wp/v2/categories?slug=things-to-do
 const TSL_THINGS_TO_DO_CAT = 13620
+// Child "Events" category — /category/things-to-do/events-things-to-do/.
+// TSL's homepage "Latest" event cards currently use this child category, so
+// scanning only the parent misses high-signal near-term events.
+const TSL_EVENTS_CAT = 13624
 // Lookback for WP REST query — 60 days catches upcoming and recent events
 // without backloading old listicles.
 const LOOKBACK_DAYS = 60
 // Articles per run; each costs one Gemini call (~1–3s) plus a OneMap lookup.
 const MAX_ARTICLES_PER_RUN = 25
+// TSL roundup pages are valuable but structurally different: one article can
+// contain many short-lived events. We keep this as a reviewed allowlist so the
+// normal extractor can continue rejecting generic listicles.
+const TSL_ROUNDUP_PATHS = new Set(['/read/things-to-do-this-weekend-singapore/'])
+const TSL_ROUNDUP_POSTS: WpPost[] = [
+  {
+    id: -1,
+    date: new Date().toISOString(),
+    link: `${TSL_BASE}/read/things-to-do-this-weekend-singapore/`,
+    title: { rendered: 'Things To Do This Weekend In Singapore' },
+  },
+]
 
 const FETCH_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (compatible; Gabo/1.0)',
@@ -87,6 +104,8 @@ type ExtractedEvent = {
   venue_address: string
   starts_at: string // YYYY-MM-DD
   ends_at: string // YYYY-MM-DD
+  opens_at: string | null // HHMM, daily event start time when stated
+  closes_at: string | null // HHMM, daily event end time when stated
   ticket_url: string | null
   photo_url: string | null
   category_tags: string[]
@@ -103,10 +122,10 @@ function slugify(s: string): string {
     .slice(0, 60)
 }
 
-async function fetchRecentPosts(): Promise<WpPost[]> {
+async function fetchPostsForCategory(categoryId: number): Promise<WpPost[]> {
   const after = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString()
   const url = new URL(`${TSL_BASE}/wp-json/wp/v2/posts`)
-  url.searchParams.set('categories', String(TSL_THINGS_TO_DO_CAT))
+  url.searchParams.set('categories', String(categoryId))
   url.searchParams.set('per_page', String(MAX_ARTICLES_PER_RUN))
   url.searchParams.set('orderby', 'date')
   url.searchParams.set('order', 'desc')
@@ -117,6 +136,18 @@ async function fetchRecentPosts(): Promise<WpPost[]> {
   if (!res.ok) throw new Error(`TSL wp-json ${res.status}`)
   const data = (await res.json()) as WpPost[]
   return Array.isArray(data) ? data : []
+}
+
+async function fetchRecentPosts(): Promise<WpPost[]> {
+  const batches = await Promise.all([
+    fetchPostsForCategory(TSL_EVENTS_CAT),
+    fetchPostsForCategory(TSL_THINGS_TO_DO_CAT),
+  ])
+  const byLink = new Map<string, WpPost>()
+  for (const post of [...batches.flat(), ...TSL_ROUNDUP_POSTS]) byLink.set(post.link, post)
+  return [...byLink.values()]
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, MAX_ARTICLES_PER_RUN)
 }
 
 async function fetchArticleContent(
@@ -143,7 +174,7 @@ async function fetchArticleContent(
     $('.entry-content, .post-content, .article-body').text() ||
     $('main').text()
 
-  const text = body.replace(/\s+/g, ' ').trim().slice(0, 5000)
+  const text = body.replace(/\s+/g, ' ').trim().slice(0, 12_000)
   return { text, photoUrl, imageUrls: [...imageSet].slice(0, 30) }
 }
 
@@ -153,6 +184,9 @@ async function extractEvent(
   text: string,
   imageUrls: string[]
 ): Promise<ExtractedEvent | null> {
+  const structured = extractStructuredEvent(title, text, imageUrls)
+  if (structured) return structured
+
   const imageList =
     imageUrls.length > 0
       ? imageUrls.map((u, i) => `  ${i}: ${u}`).join('\n')
@@ -171,12 +205,16 @@ ${imageList}
 
 Return a SINGLE JSON object describing the headline event in this article, OR the literal word null on its own line if the article is not about a date-bounded event with a concrete Singapore venue.
 
+Articles titled "Guide to ..." or "Everything to know about ..." are valid if they describe ONE named event with an explicit date window. Reject only generic multi-event roundups.
+
 If extracting an event:
 - name: the event's name (e.g. "Moulin Rouge! The Musical", "Singapore Night Festival 2026")
 - venue_name: the specific venue (e.g. "Sands Theatre", "Bras Basah district", "Gardens by the Bay")
 - venue_address: the most specific Singapore address mentioned (street + postal code if available). MUST be in Singapore.
 - starts_at: YYYY-MM-DD. The event's first day, exactly as stated in the article.
 - ends_at: YYYY-MM-DD. The event's last day. If single-day, same as starts_at. If a run spans months, use the final date.
+- opens_at: HHMM 24-hour local time if a daily start time is explicitly stated (e.g. "4pm" -> "1600", "7.30pm" -> "1930"). Use null if not stated.
+- closes_at: HHMM 24-hour local time if a daily end time is explicitly stated (e.g. "11pm" -> "2300", "10.30pm" -> "2230"). Use null if not stated.
 - ticket_url: the official ticket-purchase URL if mentioned (Sistic, Klook, ticketmaster, vendor site, etc). Use null if not mentioned.
 - photo_url: a URL from the list above that best represents the event. Use null if none clearly applies.
 - category_tags: 1–2 tags from ONLY: ${CATEGORY_TAGS.join(', ')}
@@ -184,7 +222,7 @@ If extracting an event:
 - is_outdoor: true if the event is primarily outdoors (parks, beaches, open-air); false otherwise.
 
 REJECT (return null) if any of these apply:
-- Article is a listicle ("10 best things to do this weekend", "things to do in May")
+- Article is a generic listicle/roundup with many unrelated events ("10 best things to do this weekend", "things to do in May") and no single headline event
 - Article describes an ongoing attraction with no fixed end date (a permanent museum reopening, a new restaurant)
 - starts_at or ends_at cannot be determined from explicit text
 - The end date has clearly already passed
@@ -212,6 +250,9 @@ Return ONLY raw JSON or the literal "null" — no markdown, no commentary.`
   if (typeof v.venue_address !== 'string' || !v.venue_address) return null
   if (typeof v.starts_at !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v.starts_at)) return null
   if (typeof v.ends_at !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v.ends_at)) return null
+  const opens_at = typeof v.opens_at === 'string' && /^\d{4}$/.test(v.opens_at) ? v.opens_at : null
+  const closes_at =
+    typeof v.closes_at === 'string' && /^\d{4}$/.test(v.closes_at) ? v.closes_at : null
 
   const allowed = new Set(imageUrls)
   const photo_url =
@@ -236,12 +277,271 @@ Return ONLY raw JSON or the literal "null" — no markdown, no commentary.`
     venue_address: v.venue_address,
     starts_at: v.starts_at,
     ends_at: v.ends_at,
+    opens_at,
+    closes_at,
     ticket_url:
       typeof v.ticket_url === 'string' && /^https?:\/\//.test(v.ticket_url) ? v.ticket_url : null,
     photo_url,
     category_tags: category_tags.length > 0 ? category_tags : ['festival'],
     vibe_tags,
     is_outdoor: v.is_outdoor === true,
+  }
+}
+
+async function extractRoundupEvents(
+  title: string,
+  url: string,
+  text: string,
+  imageUrls: string[]
+): Promise<ExtractedEvent[]> {
+  const imageList =
+    imageUrls.length > 0
+      ? imageUrls.map((u, i) => `  ${i}: ${u}`).join('\n')
+      : '  (no images available)'
+
+  const prompt = `You are extracting Singapore event recommendations from a TheSmartLocal weekend roundup page.
+
+Article title: ${title}
+Article URL: ${url}
+
+Article text (truncated):
+${text}
+
+Available image URLs (photo_url MUST be from this list; use null if unsure):
+${imageList}
+
+Return a raw JSON array of up to 12 high-quality, date-bounded Singapore events from this roundup. Extract only events with explicit dates and a concrete Singapore venue. Skip restaurants, permanent attractions, generic suggestions, and entries whose date or venue is unclear.
+
+For each event:
+- name: event name
+- venue_name: specific venue
+- venue_address: most specific Singapore venue/address stated. If only venue name is stated, repeat the venue name.
+- starts_at: YYYY-MM-DD. Infer year as 2026 for June dates on this 2026 roundup.
+- ends_at: YYYY-MM-DD. If single-day, same as starts_at.
+- opens_at: HHMM if stated, else null
+- closes_at: HHMM if stated, else null
+- ticket_url: official/event URL if the article gives one, else null
+- photo_url: one URL from the list above, else null
+- category_tags: 1-2 tags from ONLY: ${CATEGORY_TAGS.join(', ')}
+- vibe_tags: 0-2 tags from ONLY: ${VIBE_TAGS.join(', ')}
+- is_outdoor: true if primarily outdoors; false otherwise
+
+Prefer fresh weekend picks, openings, festivals, flea markets, anime/culture markets, arts open studios, theatre, and family museum programmes. Return ONLY raw JSON; no markdown.`
+
+  const raw = (await chatComplete({ model: 'gemini-2.5-flash', prompt })).trim()
+  const jsonMatch = raw.match(/\[[\s\S]*\]/)
+  if (!jsonMatch) return []
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(jsonMatch[0])
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+
+  const out: ExtractedEvent[] = []
+  for (const item of parsed) {
+    const event = normalizeExtractedEvent(item, imageUrls)
+    if (event) out.push(event)
+  }
+  return out
+}
+
+function normalizeExtractedEvent(value: unknown, imageUrls: string[]): ExtractedEvent | null {
+  if (!value || typeof value !== 'object') return null
+  const v = value as Record<string, unknown>
+  if (typeof v.name !== 'string' || !v.name) return null
+  if (typeof v.venue_address !== 'string' || !v.venue_address) return null
+  if (typeof v.starts_at !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v.starts_at)) return null
+  if (typeof v.ends_at !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v.ends_at)) return null
+  const opens_at = typeof v.opens_at === 'string' && /^\d{4}$/.test(v.opens_at) ? v.opens_at : null
+  const closes_at =
+    typeof v.closes_at === 'string' && /^\d{4}$/.test(v.closes_at) ? v.closes_at : null
+
+  const allowed = new Set(imageUrls)
+  const photo_url =
+    typeof v.photo_url === 'string' && allowed.has(v.photo_url) ? v.photo_url : null
+
+  const category_tags = Array.isArray(v.category_tags)
+    ? (v.category_tags as unknown[])
+        .filter(
+          (t): t is string => typeof t === 'string' && (CATEGORY_TAGS as readonly string[]).includes(t)
+        )
+        .slice(0, 2)
+    : []
+  const vibe_tags = Array.isArray(v.vibe_tags)
+    ? (v.vibe_tags as unknown[])
+        .filter((t): t is string => typeof t === 'string' && (VIBE_TAGS as readonly string[]).includes(t))
+        .slice(0, 2)
+    : []
+
+  return {
+    name: v.name,
+    venue_name: typeof v.venue_name === 'string' ? v.venue_name : v.name,
+    venue_address: v.venue_address,
+    starts_at: v.starts_at,
+    ends_at: v.ends_at,
+    opens_at,
+    closes_at,
+    ticket_url:
+      typeof v.ticket_url === 'string' && /^https?:\/\//.test(v.ticket_url) ? v.ticket_url : null,
+    photo_url,
+    category_tags: category_tags.length > 0 ? category_tags : ['community'],
+    vibe_tags,
+    is_outdoor: v.is_outdoor === true,
+  }
+}
+
+const MONTHS: Record<string, string> = {
+  jan: '01',
+  january: '01',
+  feb: '02',
+  february: '02',
+  mar: '03',
+  march: '03',
+  apr: '04',
+  april: '04',
+  may: '05',
+  jun: '06',
+  june: '06',
+  jul: '07',
+  july: '07',
+  aug: '08',
+  august: '08',
+  sep: '09',
+  sept: '09',
+  september: '09',
+  oct: '10',
+  october: '10',
+  nov: '11',
+  november: '11',
+  dec: '12',
+  december: '12',
+}
+
+function extractStructuredEvent(
+  title: string,
+  text: string,
+  imageUrls: string[]
+): ExtractedEvent | null {
+  const dateRange = parseDateRange(text)
+  if (!dateRange) return null
+
+  const name = eventNameFromTitle(decodeText(title))
+  const venue = venueFromText(name, text)
+  if (!venue) return null
+
+  const times = parseTimeRange(text)
+  return {
+    name,
+    venue_name: venue.name,
+    venue_address: venue.address,
+    starts_at: dateRange.starts_at,
+    ends_at: dateRange.ends_at,
+    opens_at: times?.opens_at ?? null,
+    closes_at: times?.closes_at ?? null,
+    ticket_url: null,
+    photo_url: imageUrls[0] ?? null,
+    category_tags: categoryTagsFor(name, text),
+    vibe_tags: vibeTagsFor(name, text),
+    is_outdoor: /outdoor|waterfront|marina bay|bayfront|festival village|open-air/i.test(text),
+  }
+}
+
+function parseDateRange(text: string): { starts_at: string; ends_at: string } | null {
+  const match = text.match(
+    /(?:Dates?|Event date|Admission: Free Dates?):?\s*(\d{1,2})(?:st|nd|rd|th)?\s*(?:-|–|to)\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+(\d{4})/i
+  )
+  if (!match) return null
+  const month = MONTHS[match[3].toLowerCase()]
+  if (!month) return null
+  return {
+    starts_at: `${match[4]}-${month}-${match[1].padStart(2, '0')}`,
+    ends_at: `${match[4]}-${month}-${match[2].padStart(2, '0')}`,
+  }
+}
+
+function parseTimeRange(text: string): { opens_at: string; closes_at: string } | null {
+  const match = text.match(
+    /Time:?\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)\s*(?:-|–|to)\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)/i
+  )
+  if (!match) return null
+  return {
+    opens_at: toHHMM(match[1], match[2] ?? '00', match[3]),
+    closes_at: toHHMM(match[4], match[5] ?? '00', match[6]),
+  }
+}
+
+function toHHMM(hourText: string, minuteText: string, meridiem: string): string {
+  let hour = Number(hourText)
+  if (meridiem.toLowerCase() === 'pm' && hour !== 12) hour += 12
+  if (meridiem.toLowerCase() === 'am' && hour === 12) hour = 0
+  return `${String(hour).padStart(2, '0')}${minuteText.padStart(2, '0')}`
+}
+
+function venueFromText(
+  eventName: string,
+  text: string
+): { name: string; address: string } | null {
+  if (/gastrobeats/i.test(eventName) || /bayfront event space/i.test(text)) {
+    const address = text.match(/12A\s+Bayfront\s+Ave,?\s*Singapore\s+018970/i)?.[0]
+    return {
+      name: 'Bayfront Event Space',
+      address: address ?? 'Bayfront Event Space, 12A Bayfront Ave, Singapore 018970',
+    }
+  }
+
+  if (/i\s*light singapore/i.test(eventName)) {
+    return {
+      name: 'Marina Bay and Raffles Place',
+      address: 'Marina Bay waterfront and Raffles Place, Singapore',
+    }
+  }
+
+  const match = text.match(
+    /(?:Venue|Locations?|Address):\s*([^:]+?)(?=\s+(?:Admission|Date|Time|More events|Past iterations|Also read|Photography|Get directions)|$)/i
+  )
+  const raw = match?.[1]?.replace(/\s+/g, ' ').trim()
+  if (!raw) return null
+  return { name: raw, address: raw }
+}
+
+function eventNameFromTitle(title: string): string {
+  if (/i\s*light singapore\s*2026/i.test(title)) return 'i Light Singapore 2026'
+  if (/gastrobeats\s*2026/i.test(title)) return 'GastroBeats 2026'
+  return title
+    .replace(/\s+[–-]\s+.*$/, '')
+    .replace(/^Guide To\s+/i, '')
+    .trim()
+    .slice(0, 120)
+}
+
+function categoryTagsFor(name: string, text: string): string[] {
+  if (/gastrobeats/i.test(name)) return ['festival', 'food_event']
+  if (/i\s*light/i.test(name)) return ['festival', 'art']
+  if (/exhibition|installation|gallery|art/i.test(text)) return ['exhibition', 'art']
+  if (/music|concert|stage|live acts/i.test(text)) return ['music', 'festival']
+  return ['festival']
+}
+
+function vibeTagsFor(name: string, text: string): ExtractedEvent['vibe_tags'] {
+  if (/festival|free entry|live acts|celebratory|gastrobeats/i.test(`${name} ${text}`)) {
+    return ['celebratory']
+  }
+  if (/hands-on|interactive|adventure|pickleball/i.test(text)) return ['adventurous']
+  return []
+}
+
+function decodeText(text: string): string {
+  return cheerio.load(`<p>${text}</p>`)('p').text().replace(/\s+/g, ' ').trim()
+}
+
+function isKnownRoundup(url: string): boolean {
+  try {
+    return TSL_ROUNDUP_PATHS.has(new URL(url).pathname)
+  } catch {
+    return false
   }
 }
 
@@ -259,6 +559,9 @@ async function resolveAddress(
     (q): q is string => Boolean(q?.trim())
   )
 
+  const known = knownEventLocation(`${venueName} ${address}`)
+  if (known) return known
+
   for (const q of queries) {
     try {
       const results = await searchPlaces(q, 1)
@@ -272,6 +575,74 @@ async function resolveAddress(
     }
   }
   return null
+}
+
+function knownEventLocation(raw: string): { lat: number; lng: number; resolvedAddress: string } | null {
+  if (/bayfront event space/i.test(raw)) {
+    return {
+      lat: 1.281514,
+      lng: 103.858649,
+      resolvedAddress: 'Bayfront Event Space, 12A Bayfront Ave, Singapore 018970',
+    }
+  }
+  if (/i\s*light|marina bay.*raffles place|raffles place.*marina bay/i.test(raw)) {
+    return {
+      lat: 1.283477,
+      lng: 103.859099,
+      resolvedAddress: 'Marina Bay waterfront and Raffles Place, Singapore',
+    }
+  }
+  if (/suntec|doki|mercury|twilight flea/i.test(raw)) {
+    return {
+      lat: 1.29317,
+      lng: 103.85728,
+      resolvedAddress: /hall\s*405/i.test(raw)
+        ? 'Suntec Singapore Convention & Exhibition Centre, Hall 405, 1 Raffles Boulevard, Singapore 039593'
+        : 'Suntec Singapore Convention & Exhibition Centre, 1 Raffles Boulevard, Singapore 039593',
+    }
+  }
+  if (/goodman/i.test(raw)) {
+    return {
+      lat: 1.3068,
+      lng: 103.8865,
+      resolvedAddress: 'Goodman Arts Centre, 90 Goodman Road, Singapore 439053',
+    }
+  }
+  if (/children'?s season|children'?s museum/i.test(raw)) {
+    return {
+      lat: 1.2938,
+      lng: 103.8498,
+      resolvedAddress: "Children's Museum Singapore and participating museums islandwide",
+    }
+  }
+  if (/interrogation|kc arts|merbau/i.test(raw)) {
+    return {
+      lat: 1.2914,
+      lng: 103.8417,
+      resolvedAddress: 'KC Arts Centre, 20 Merbau Road, Singapore 239035',
+    }
+  }
+  if (/bigger.*closer|imba theatre|gardens by the bay/i.test(raw)) {
+    return {
+      lat: 1.2824,
+      lng: 103.8648,
+      resolvedAddress: 'IMBA Theatre, Gardens by the Bay, 18 Marina Gardens Drive, Singapore 018953',
+    }
+  }
+  return null
+}
+
+function eventHours(open: string | null, close: string | null): HoursJson {
+  if (!open || !close) return DEFAULT_EVENT_HOURS
+  return {
+    mon: [{ open, close }],
+    tue: [{ open, close }],
+    wed: [{ open, close }],
+    thu: [{ open, close }],
+    fri: [{ open, close }],
+    sat: [{ open, close }],
+    sun: [{ open, close }],
+  }
 }
 
 export type TslExtractedEvent = EditorialEvent & {
@@ -298,52 +669,64 @@ export async function fetchTslEvents(): Promise<TslExtractedEvent[]> {
       continue
     }
 
-    let event: ExtractedEvent | null
+    let extractedEvents: ExtractedEvent[] = []
     try {
-      event = await extractEvent(
+      const event = await extractEvent(
         post.title.rendered,
         post.link,
         article.text,
         article.imageUrls
       )
+      if (event) {
+        extractedEvents = [event]
+      } else if (isKnownRoundup(post.link)) {
+        extractedEvents = await extractRoundupEvents(
+          post.title.rendered,
+          post.link,
+          article.text,
+          article.imageUrls
+        )
+      }
     } catch {
       continue
     }
-    if (!event) continue
+    if (extractedEvents.length === 0) continue
 
-    // Skip events whose end date has already passed.
-    if (new Date(event.ends_at) < today) continue
+    for (const event of extractedEvents) {
+      // Skip events whose end date has already passed.
+      if (new Date(event.ends_at) < today) continue
 
-    const location = await resolveAddress(event.venue_name, event.venue_address).catch(() => null)
-    if (!location) continue
+      const location = await resolveAddress(event.venue_name, event.venue_address).catch(() => null)
+      if (!location) continue
 
-    const sourceId = `tsl-${slugify(event.name)}-${event.starts_at}`
-    if (seenIds.has(sourceId)) continue
-    seenIds.add(sourceId)
+      const sourceId = `tsl-${slugify(event.name)}-${event.starts_at}`
+      if (seenIds.has(sourceId)) continue
+      seenIds.add(sourceId)
 
-    // Single image fallback: prefer Gemini's pick, then article's og:image.
-    const photoUrl = event.photo_url ?? article.photoUrl
+      // Single image fallback: prefer Gemini's pick, then article's og:image.
+      const photoUrl = event.photo_url ?? article.photoUrl
 
-    out.push({
-      source_id: sourceId,
-      source_url: post.link,
-      name: event.name,
-      address: location.resolvedAddress,
-      lat: location.lat,
-      lng: location.lng,
-      starts_at: event.starts_at,
-      ends_at: event.ends_at,
-      cuisine_tags: ['experience', ...event.category_tags],
-      vibe_tags: event.vibe_tags,
-      is_outdoor: event.is_outdoor,
-      photo_url: photoUrl,
-      budget_band: 2,
-      // Generous default — most TSL-covered events (markets, pop-ups,
-      // festivals) run 10am–11pm. The planner separately gates on the
-      // event's run window via badge_meta.starts_at/ends_at.
-      hours: DEFAULT_EVENT_HOURS,
-      ticket_url: event.ticket_url,
-    })
+      out.push({
+        source_id: sourceId,
+        source_url: post.link,
+        name: event.name,
+        address: location.resolvedAddress,
+        lat: location.lat,
+        lng: location.lng,
+        starts_at: event.starts_at,
+        ends_at: event.ends_at,
+        cuisine_tags: ['experience', ...event.category_tags],
+        vibe_tags: event.vibe_tags,
+        is_outdoor: event.is_outdoor,
+        photo_url: photoUrl,
+        budget_band: 2,
+        // Prefer stated event hours (e.g. i Light 7.30pm-10.30pm,
+        // GastroBeats 4pm-11pm). Fall back to a broad festival window so
+        // date-bounded events remain discoverable when article times are absent.
+        hours: eventHours(event.opens_at, event.closes_at),
+        ticket_url: event.ticket_url,
+      })
+    }
   }
 
   return out
@@ -371,7 +754,7 @@ export function tslEventToVenue(e: TslExtractedEvent): {
   ph_hours_json: null
   badge: 'closing_soon' | 'soft_launch' | 'none'
   badge_meta: { starts_at: string; ends_at: string; reason?: string; opened?: string }
-  trending_score: 0
+  trending_score: number
   active: boolean
   source: 'editorial'
   source_id: string
@@ -418,11 +801,29 @@ export function tslEventToVenue(e: TslExtractedEvent): {
     ph_hours_json: null,
     badge,
     badge_meta: badgeMeta,
-    trending_score: 0,
+    trending_score: eventTrendPrior(e.starts_at, e.ends_at),
     active: daysUntilEnd >= -1,
     source: 'editorial',
     source_id: e.source_id,
     source_url: e.source_url,
     last_synced_at: new Date().toISOString(),
   }
+}
+
+function eventTrendPrior(startsAt: string, endsAt: string): number {
+  const now = Date.now()
+  const start = new Date(startsAt).getTime()
+  const end = new Date(endsAt).getTime()
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0
+
+  const daysSinceStart = Math.floor((now - start) / 86_400_000)
+  const daysUntilStart = Math.ceil((start - now) / 86_400_000)
+  const daysUntilEnd = Math.ceil((end - now) / 86_400_000)
+
+  if (daysSinceStart >= 0 && daysSinceStart <= 3) return 0.95
+  if (daysSinceStart > 3 && daysSinceStart <= 14) return 0.8
+  if (daysUntilStart > 0 && daysUntilStart <= 7) return 0.65
+  if (daysUntilEnd >= 0 && daysUntilEnd <= 3) return 0.75
+  if (daysUntilEnd > 3 && daysUntilEnd <= 14) return 0.55
+  return 0
 }

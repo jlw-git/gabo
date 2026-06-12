@@ -2,7 +2,8 @@
 //   1. Museum scrapers — SAM + NGS exhibitions (live HTML scraping)
 //   2. Esplanade      — in-house programming (sitemap + JSON-LD parse)
 //   3. The Smart Local — date-bounded events extracted via Gemini Flash
-//   4. Editorial      — hand-curated picks: ArtScience, Gardens, NHB
+//   4. Fresh discovery — grounded web search for viral/new limited runs
+//   5. Editorial      — hand-curated picks: ArtScience, Gardens, NHB
 //
 // Bandsintown was removed: its Data Applications Terms restrict API access
 // to artists/representatives and forbid third-party aggregation, so a
@@ -14,6 +15,7 @@
 import { createServiceRoleClient } from '@/lib/supabase/server'
 import { EDITORIAL_EVENTS, editorialEventToVenue } from './editorial-events'
 import { fetchEsplanadeEvents } from './esplanade'
+import { discoverFreshEvents } from './fresh-event-discovery'
 import {
   fetchNgsExhibitions,
   fetchSamExhibitions,
@@ -31,6 +33,8 @@ export type EventsSyncSummary = {
   esplanade_error: string | null
   tsl_events: number
   tsl_error: string | null
+  discovered_events: number
+  discovery_error: string | null
   editorial_events: number
   upserted: number
   errors: string[]
@@ -47,6 +51,8 @@ export async function syncEventsCatalog(): Promise<EventsSyncSummary> {
     esplanade_error: null,
     tsl_events: 0,
     tsl_error: null,
+    discovered_events: 0,
+    discovery_error: null,
     editorial_events: 0,
     upserted: 0,
     errors: [],
@@ -95,20 +101,31 @@ export async function syncEventsCatalog(): Promise<EventsSyncSummary> {
     summary.tsl_error = err instanceof Error ? err.message : 'unknown'
   }
 
-  // 5) Editorial events — always present, no API dependency.
+  // 5) Grounded fresh-event discovery — CJ Hendry-style viral / just-launched
+  // happenings that may not have landed in a stable feed yet.
+  try {
+    const discovery = await discoverFreshEvents()
+    summary.discovered_events = discovery.accepted
+    summary.errors.push(...discovery.errors)
+    for (const e of discovery.events) collected.push(editorialEventToVenue(e))
+  } catch (err) {
+    summary.discovery_error = err instanceof Error ? err.message : 'unknown'
+  }
+
+  // 6) Editorial events — always present, no API dependency.
   for (const e of EDITORIAL_EVENTS) {
     collected.push(editorialEventToVenue(e))
     summary.editorial_events += 1
   }
 
-  // 6) Dedup by source:source_id. Editorial wins ties (appended last).
+  // 7) Dedup by source:source_id. Editorial wins ties (appended last).
   const byKey = new Map<string, AnyRow>()
   for (const row of collected) {
     byKey.set(`${row.source}:${row.source_id}`, row)
   }
   const deduped = [...byKey.values()]
 
-  // 7) Upsert to Supabase. Service role bypasses RLS — sync routes are
+  // 8) Upsert to Supabase. Service role bypasses RLS — sync routes are
   // already protected by CRON_SECRET.
   const supabase = createServiceRoleClient()
   const chunkSize = 50

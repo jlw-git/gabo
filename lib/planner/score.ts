@@ -10,7 +10,12 @@ const BADGE_VALUES: Record<Badge, number> = {
 }
 
 export function freshness(venue: Venue): number {
-  return BADGE_VALUES[venue.badge] + 0.3 * venue.trending_score
+  return (
+    BADGE_VALUES[venue.badge] +
+    0.45 * venue.trending_score +
+    noveltyBoost(venue) +
+    sourceVelocityBoost(venue)
+  )
 }
 
 export function matchScore(venue: Venue, profile: Profile): number {
@@ -27,7 +32,46 @@ export function matchScore(venue: Venue, profile: Profile): number {
 // Used to cap candidates BEFORE hitting the Routing API (which costs quota).
 // We can't compute fairness/friction without ETAs, so we only use match + freshness.
 export function prescore(venue: Venue, profile: Profile): number {
-  return 0.3 * matchScore(venue, profile) + 0.25 * freshness(venue)
+  return 0.25 * matchScore(venue, profile) + 0.4 * freshness(venue)
+}
+
+function noveltyBoost(venue: Venue): number {
+  const meta = venue.badge_meta
+  const startsAt = typeof meta?.starts_at === 'string' ? meta.starts_at : null
+  const openedAt = typeof meta?.opened === 'string' ? meta.opened : null
+
+  if (startsAt) {
+    const days = daysSince(startsAt)
+    if (days >= 0 && days <= 3) return 0.55
+    if (days > 3 && days <= 14) return 0.35
+
+    const daysUntil = -days
+    if (daysUntil > 0 && daysUntil <= 7) return 0.25
+  }
+
+  if (openedAt) {
+    const days = daysSince(openedAt)
+    if (days >= 0 && days <= 14) return 0.45
+    if (days > 14 && days <= 45) return 0.25
+  }
+
+  return 0
+}
+
+function sourceVelocityBoost(venue: Venue): number {
+  if (venue.source !== 'editorial') return 0
+  const synced = typeof venue.last_synced_at === 'string' ? venue.last_synced_at : null
+  if (!synced) return 0
+  const days = daysSince(synced)
+  if (days >= 0 && days <= 7) return 0.15
+  if (days > 7 && days <= 21) return 0.08
+  return 0
+}
+
+function daysSince(iso: string): number {
+  const t = new Date(iso).getTime()
+  if (!Number.isFinite(t)) return Number.POSITIVE_INFINITY
+  return Math.floor((Date.now() - t) / 86_400_000)
 }
 
 export function scoreWithETAs(

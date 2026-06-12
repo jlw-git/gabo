@@ -4,6 +4,7 @@ import { agenticFlag } from '@/lib/agentic-flags'
 import { mapWithConcurrency } from '@/lib/async/pool'
 import { fetchDriveRoute, type DriveRouteResult } from '@/lib/onemap/client'
 import { evaluateCandidates } from '@/lib/planner/gemini-eval'
+import { isEvent } from '@/lib/planner/category'
 import { isVenueOpenForMeal } from '@/lib/planner/hours'
 import type { PlanRequest } from '@/lib/planner/request-validation'
 import {
@@ -23,6 +24,7 @@ import { fetchWeatherCondition, type WeatherResult } from '@/lib/weather'
 // categories (dining + events) we want depth in both.
 const ROUTING_CANDIDATE_CAP = 24
 const ROUTING_CONCURRENCY = 5
+const ROUTING_MIN_PER_CATEGORY = Math.floor(ROUTING_CANDIDATE_CAP / 2)
 
 type VenueLoadResult = {
   venues: Venue[]
@@ -85,9 +87,7 @@ export async function planDate(request: PlanRequest, deps: PlanDateDeps = {}) {
         ).length - candidates.length
       : 0
 
-  const topByPrescore = [...candidates]
-    .sort((a, b) => prescore(b, profile) - prescore(a, profile))
-    .slice(0, ROUTING_CANDIDATE_CAP)
+  const topByPrescore = selectRoutingCandidates(candidates, profile)
 
   if (topByPrescore.length === 0) {
     return {
@@ -293,6 +293,24 @@ async function routeAndScore(
   return { ranked, cachedLegs, attempted, failed }
 }
 
+function selectRoutingCandidates(venues: Venue[], profile: Profile): Venue[] {
+  const byPrescore = (a: Venue, b: Venue) => prescore(b, profile) - prescore(a, profile)
+  const dining = venues.filter((v) => !isEvent(v)).sort(byPrescore)
+  const events = venues.filter(isEvent).sort(byPrescore)
+
+  const selected = new Map<string, Venue>()
+  const add = (v: Venue) => {
+    if (selected.size < ROUTING_CANDIDATE_CAP) selected.set(v.id, v)
+  }
+
+  for (const v of events.slice(0, ROUTING_MIN_PER_CATEGORY)) add(v)
+  for (const v of dining.slice(0, ROUTING_MIN_PER_CATEGORY)) add(v)
+
+  for (const v of [...venues].sort(byPrescore)) add(v)
+
+  return [...selected.values()].sort(byPrescore)
+}
+
 // Relaxation pass. Called only when at least one bucket came back below
 // MIN_HEALTHY_RESULTS. Runs the relaxation agent, applies its toggles to
 // a working copy of the filter+score pipeline, and returns the widened
@@ -352,14 +370,7 @@ async function attemptWiden(
     deps.weather,
     deps.scheduledDate
   )
-  const relaxedTop = [...relaxedCandidates]
-    .sort((a, b) => prescore(b, relaxedProfile) - prescore(a, relaxedProfile))
-    .slice(0, ROUTING_CANDIDATE_CAP)
-  // No new prefilter survivors *and* distance cap not in play → nothing to
-  // gain. (The distance cap toggle can still help even if the prefilter
-  // didn't grow, since it changes what passes the post-routing 60-min cap.)
-  if (relaxedTop.length <= deps.candidates.length && !toggles.drop_distance_cap) return null
-
+  const relaxedTop = selectRoutingCandidates(relaxedCandidates, relaxedProfile)
   const route = await routeAndScore(
     relaxedTop,
     relaxedProfile,

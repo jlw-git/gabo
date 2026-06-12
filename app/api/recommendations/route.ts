@@ -4,7 +4,7 @@ import {
   isRecommended,
 } from '@/lib/planner/badges'
 import { isEvent } from '@/lib/planner/category'
-import { scoreWithoutEtas } from '@/lib/planner/score'
+import { freshness, scoreWithoutEtas } from '@/lib/planner/score'
 import type { PlanCard, Profile, Venue } from '@/lib/planner/types'
 import { createClient } from '@/lib/supabase/server'
 
@@ -65,7 +65,7 @@ function pickTrending(venues: Venue[], now: Date): Venue[] {
       }
       return false
     })
-    .sort((a, b) => b.trending_score - a.trending_score)
+    .sort((a, b) => freshness(b) - freshness(a))
     .slice(0, PER_LIST_LIMIT)
 }
 
