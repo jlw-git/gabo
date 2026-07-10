@@ -180,7 +180,7 @@ const MAX_ETA_MIN = 60
 export function bucketByCategory(ranked: RankedVenue[]): Buckets {
   const reachable = ranked.filter((r) => {
     const maxEta = Math.max(r.eta_a_min, r.eta_b_min)
-    return maxEta === 0 || maxEta <= MAX_ETA_MIN
+    return maxEta === 0 || simulatedMrtEta(maxEta) <= MAX_ETA_MIN
   })
 
   const deduped = dedupeByVenue(reachable)
