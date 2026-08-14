@@ -13,6 +13,11 @@
 
 import { headers } from 'next/headers'
 import { loadRecentRuns, type AgentRunRow, type RunKind } from '@/lib/agents/run-log'
+import {
+  loadRecentGeminiUsage,
+  type GeminiUsageRow,
+  type GeminiUsageStats,
+} from '@/lib/agents/gemini-usage-read'
 import { agenticFlag } from '@/lib/agentic-flags'
 
 export const dynamic = 'force-dynamic'
@@ -36,11 +41,12 @@ export default async function AgentsAdminPage({ searchParams }: Search) {
 
   // Pull all four kinds in parallel. Each loadRecentRuns swallows its own
   // errors and returns []; one failed query won't blank the page.
-  const [blogs, museums, freshness, dining] = await Promise.all([
+  const [blogs, museums, freshness, dining, geminiUsage] = await Promise.all([
     loadRecentRuns('blogs'),
     loadRecentRuns('museums'),
     loadRecentRuns('freshness'),
     loadRecentRuns('dining'),
+    loadRecentGeminiUsage(),
   ])
 
   const planMeta = await loadLastPlanMeta()
@@ -59,8 +65,94 @@ export default async function AgentsAdminPage({ searchParams }: Search) {
       <RunPanel kind="freshness" rows={freshness} />
       <RunPanel kind="dining" rows={dining} />
 
+      <GeminiUsagePanel rows={geminiUsage.rows} stats={geminiUsage.stats} />
+
       <PlanMetaPanel meta={planMeta} />
     </main>
+  )
+}
+
+function GeminiUsagePanel({
+  rows,
+  stats,
+}: {
+  rows: GeminiUsageRow[]
+  stats: GeminiUsageStats | null
+}) {
+  return (
+    <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-lg font-semibold">Gemini usage</h2>
+        <p className="text-xs text-stone-500">Last 7 days · latest {rows.length} calls</p>
+      </div>
+
+      {stats ? (
+        <>
+          <dl className="mt-3 grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+            <Stat label="logged calls" value={stats.total.toLocaleString()} />
+            <Stat label="failed/empty" value={stats.failed.toLocaleString()} tone={stats.failed > 0 ? 'warn' : 'ok'} />
+            <Stat label="grounded" value={stats.grounded.toLocaleString()} tone={stats.grounded > 0 ? 'warn' : 'neutral'} />
+            <Stat label="features" value={stats.byFeature.length.toLocaleString()} />
+          </dl>
+
+          {stats.byFeature.length > 0 && (
+            <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
+              {stats.byFeature.slice(0, 8).map((f) => (
+                <div key={f.feature} className="rounded-lg bg-stone-50 px-3 py-2">
+                  <span className="font-medium text-stone-700">{f.feature}</span>
+                  <span className="ml-2 text-stone-500">
+                    {f.count} calls · {f.failed} failed · {f.grounded} grounded
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="mt-3 text-sm text-stone-500">
+          No usage data loaded. Apply the <code>0009_gemini_usage_log.sql</code> migration first.
+        </p>
+      )}
+
+      {rows.length > 0 && (
+        <details className="mt-4 text-sm">
+          <summary className="cursor-pointer text-stone-600">Recent calls ({rows.length})</summary>
+          <div className="mt-2 space-y-2">
+            {rows.slice(0, 20).map((row) => (
+              <GeminiUsageRowView key={row.id} row={row} />
+            ))}
+          </div>
+        </details>
+      )}
+    </section>
+  )
+}
+
+function GeminiUsageRowView({ row }: { row: GeminiUsageRow }) {
+  return (
+    <div className="rounded-lg bg-stone-50 p-3 text-xs">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-medium text-stone-700">{formatWhen(row.created_at)}</span>
+        <span className="font-mono">{row.feature}</span>
+        <span>{row.provider}/{row.model}</span>
+        {row.grounded && <span className="text-amber-700">grounded</span>}
+        {!row.ok && <span className="text-rose-700">failed/empty</span>}
+      </div>
+      <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-stone-600 sm:grid-cols-5">
+        <span>prompt: {row.prompt_chars.toLocaleString()} chars</span>
+        <span>output: {row.output_chars.toLocaleString()} chars</span>
+        <span>duration: {row.duration_ms.toLocaleString()}ms</span>
+        <span>tools: {row.tool_call_count}</span>
+        <span>ip: {row.ip_hash ? row.ip_hash.slice(0, 10) : '—'}</span>
+      </div>
+      {row.error_message && <p className="mt-1 text-rose-700">{row.error_message}</p>}
+      <details className="mt-2">
+        <summary className="cursor-pointer text-stone-600">Prompt preview</summary>
+        <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-white p-2 text-[11px] leading-snug text-stone-700">
+          {row.prompt_preview}
+        </pre>
+      </details>
+    </div>
   )
 }
 

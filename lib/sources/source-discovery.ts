@@ -76,6 +76,7 @@ Return ONLY a raw JSON array, each item:
 
   const text = await chatComplete({
     model: EXTRACTION_MODEL,
+    feature: 'source-discovery',
     grounded: true,
     timeoutMs: 60_000, // grounded web search is slow + variable
     prompt,

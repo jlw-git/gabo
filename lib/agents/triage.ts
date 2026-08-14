@@ -139,6 +139,7 @@ export async function runTriage(input: TriageInput): Promise<TriageResult> {
   const draft = await generateJson<TriageDraft>({
     model: TRIAGE_MODEL,
     prompt: buildPrompt(input.freeform),
+    feature: 'plan-triage',
     timeoutMs: 5000,
   })
 

@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
   const raw = await chatComplete({
     model: COPY_MODEL,
     prompt: buildPrompt(loved, vibes, easingOff),
+    feature: 'taste-narrate',
     timeoutMs: 6000,
   })
   // Strip wrapping quotes / stray whitespace the model sometimes adds; cap length

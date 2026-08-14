@@ -106,7 +106,12 @@ Return ONLY a raw JSON array, no markdown, no explanation:
 }
 
 async function callGemini(prompt: string): Promise<Map<string, string>> {
-  const text = await chatComplete({ model: COPY_MODEL, prompt, timeoutMs: EVAL_TIMEOUT_MS })
+  const text = await chatComplete({
+    model: COPY_MODEL,
+    prompt,
+    feature: 'plan-copy',
+    timeoutMs: EVAL_TIMEOUT_MS,
+  })
   const match = text.match(/\[[\s\S]*\]/)
   if (!match) return new Map()
 

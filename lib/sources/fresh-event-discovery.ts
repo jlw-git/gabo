@@ -129,6 +129,7 @@ Rules:
 
   const text = await chatComplete({
     model: EXTRACTION_MODEL,
+    feature: 'fresh-event-discovery',
     grounded: true,
     timeoutMs: 60_000,
     prompt,

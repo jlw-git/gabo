@@ -10,10 +10,12 @@ import {
   type ToolCall,
   type ToolLoopResult,
 } from '@/lib/agents/provider'
+import type { GeminiUsageFeature } from '@/lib/agents/gemini-usage-log'
 
 export type GenerateJsonOptions = {
   model: string
   prompt: string
+  feature?: GeminiUsageFeature
   // Wall-clock budget — on expiry the call resolves to null so callers can
   // gracefully degrade. Default 8s (matches the existing gemini-eval budget).
   timeoutMs?: number
@@ -29,6 +31,7 @@ export async function generateJson<T>(opts: GenerateJsonOptions): Promise<T | nu
   const text = await chatComplete({
     model: opts.model,
     prompt: opts.prompt,
+    feature: opts.feature,
     grounded: opts.groundWithSearch,
     timeoutMs: opts.timeoutMs ?? 8000,
   })
@@ -61,6 +64,7 @@ export type GenerateWithToolsOptions = {
   model: string
   prompt: string
   tools: ToolDef[]
+  feature?: GeminiUsageFeature
   maxRounds?: number
   timeoutMs?: number
 }
@@ -72,6 +76,7 @@ export async function generateWithTools(
     model: opts.model,
     prompt: opts.prompt,
     tools: opts.tools,
+    feature: opts.feature,
     maxRounds: opts.maxRounds,
     timeoutMs: opts.timeoutMs,
   })
@@ -101,6 +106,7 @@ function isVerdict(x: unknown): x is Verdict {
 export type VerifyOptions = {
   model: string
   prompt: string
+  feature?: GeminiUsageFeature
   timeoutMs?: number
   groundWithSearch?: boolean
 }
@@ -112,6 +118,7 @@ export async function verify(opts: VerifyOptions): Promise<Verdict> {
   const out = await generateJson<Verdict>({
     model: opts.model,
     prompt: opts.prompt,
+    feature: opts.feature,
     timeoutMs: opts.timeoutMs ?? 5000,
     groundWithSearch: opts.groundWithSearch,
   })
@@ -169,6 +176,7 @@ export type DebateOptions = {
   proposerPrompt: string
   skepticPrompt: string
   model: string
+  feature?: GeminiUsageFeature
   timeoutMs?: number
   // When true, both proposer + skeptic run with Google Search grounding
   // (museum + freshness verifiers need this).
@@ -183,12 +191,14 @@ export async function debateVerdict(opts: DebateOptions): Promise<Verdict> {
     verify({
       model: opts.model,
       prompt: opts.proposerPrompt,
+      feature: opts.feature,
       timeoutMs: opts.timeoutMs,
       groundWithSearch: opts.groundWithSearch,
     }),
     verify({
       model: opts.model,
       prompt: opts.skepticPrompt,
+      feature: opts.feature,
       timeoutMs: opts.timeoutMs,
       groundWithSearch: opts.groundWithSearch,
     }),

@@ -96,6 +96,7 @@ async function checkOne(row: FreshnessRow): Promise<Verdict> {
       proposerPrompt: proposerPrompt(row),
       skepticPrompt: skepticPrompt(row),
       model: VERIFIER_MODEL,
+      feature: 'freshness-verifier',
       timeoutMs: 25_000,
       groundWithSearch: true,
     })
@@ -103,6 +104,7 @@ async function checkOne(row: FreshnessRow): Promise<Verdict> {
   return verify({
     model: VERIFIER_MODEL,
     prompt: judgePrompt(row),
+    feature: 'freshness-verifier',
     timeoutMs: 10_000,
     groundWithSearch: true,
   })

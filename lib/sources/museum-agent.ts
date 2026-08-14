@@ -153,6 +153,7 @@ async function searchExhibitions(museum: MuseumConfig): Promise<RawExhibition[]>
   const text = (
     await chatComplete({
       model: EXTRACTION_MODEL,
+      feature: 'museum-agent',
       grounded: true, // Google Search grounding — pinned to Gemini-direct
       timeoutMs: 60_000, // grounded web search is slow + variable (was unbounded pre-provider)
       prompt: `Search for current and upcoming exhibitions at ${museum.name} in Singapore.
