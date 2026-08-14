@@ -144,6 +144,7 @@ async function rerankBucket(
   const parsed = await generateJson<RerankRow[]>({
     model: RANKER_MODEL,
     prompt,
+    feature: 'plan-ranker',
     timeoutMs: 6000,
   })
 

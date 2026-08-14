@@ -9,6 +9,7 @@
 
 import { GoogleGenAI, type Content, type FunctionCall, type Part } from '@google/genai'
 import { OPENROUTER_FALLBACK_MODEL } from '@/lib/agents/models'
+import { recordGeminiUsage, type GeminiUsageFeature } from '@/lib/agents/gemini-usage-log'
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
@@ -87,17 +88,21 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 export type ChatCompleteOptions = {
   model: string
   prompt: string
+  feature?: GeminiUsageFeature
   grounded?: boolean
   timeoutMs?: number
 }
 
 export async function chatComplete(opts: ChatCompleteOptions): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 8000
+  const started = Date.now()
+  let provider: Provider = 'gemini'
+  let model = opts.model
 
   const run = (async (): Promise<string> => {
     try {
-      const provider = resolveProvider(opts.model, { grounded: opts.grounded })
-      const model = mapModel(opts.model, provider)
+      provider = resolveProvider(opts.model, { grounded: opts.grounded })
+      model = mapModel(opts.model, provider)
 
       if (provider === 'gemini') {
         const ai = geminiClient()
@@ -127,7 +132,19 @@ export async function chatComplete(opts: ChatCompleteOptions): Promise<string> {
     }
   })()
 
-  return withTimeout(run, timeoutMs, '')
+  const text = await withTimeout(run, timeoutMs, '')
+  await recordGeminiUsage({
+    feature: opts.feature,
+    provider,
+    model,
+    grounded: opts.grounded,
+    prompt: opts.prompt,
+    outputChars: text.length,
+    durationMs: Date.now() - started,
+    ok: text.length > 0,
+    errorMessage: text.length > 0 ? undefined : 'empty response, timeout, or provider failure',
+  })
+  return text
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +166,7 @@ export type ChatCompleteWithToolsOptions = {
   model: string
   prompt: string
   tools: ProviderTool[]
+  feature?: GeminiUsageFeature
   maxRounds?: number
   timeoutMs?: number
 }
@@ -158,11 +176,14 @@ export async function chatCompleteWithTools(
 ): Promise<ToolLoopResult | null> {
   const timeoutMs = opts.timeoutMs ?? 12_000
   const maxRounds = opts.maxRounds ?? 3
+  const started = Date.now()
+  let provider: Provider = 'gemini'
+  let model = opts.model
 
   const run = (async (): Promise<ToolLoopResult | null> => {
     try {
-      const provider = resolveProvider(opts.model, {})
-      const model = mapModel(opts.model, provider)
+      provider = resolveProvider(opts.model, {})
+      model = mapModel(opts.model, provider)
       return provider === 'gemini'
         ? await geminiToolLoop(model, opts.prompt, opts.tools, maxRounds)
         : await openRouterToolLoop(model, opts.prompt, opts.tools, maxRounds)
@@ -171,7 +192,20 @@ export async function chatCompleteWithTools(
     }
   })()
 
-  return withTimeout(run, timeoutMs, null)
+  const result = await withTimeout(run, timeoutMs, null)
+  await recordGeminiUsage({
+    feature: opts.feature,
+    provider,
+    model,
+    prompt: opts.prompt,
+    outputChars: result?.text.length ?? 0,
+    durationMs: Date.now() - started,
+    ok: Boolean(result),
+    toolCallCount: result?.toolCalls.length ?? 0,
+    toolCalls: result?.toolCalls ?? [],
+    errorMessage: result ? undefined : 'tool loop timeout or provider failure',
+  })
+  return result
 }
 
 async function runTool(

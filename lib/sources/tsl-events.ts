@@ -231,7 +231,9 @@ REJECT (return null) if any of these apply:
 
 Return ONLY raw JSON or the literal "null" — no markdown, no commentary.`
 
-  const raw = (await chatComplete({ model: 'gemini-2.5-flash', prompt })).trim()
+  const raw = (
+    await chatComplete({ model: 'gemini-2.5-flash', prompt, feature: 'tsl-events' })
+  ).trim()
   if (!raw || raw === 'null') return null
 
   const jsonMatch = raw.match(/\{[\s\S]*\}/)
@@ -328,7 +330,9 @@ For each event:
 
 Prefer fresh weekend picks, openings, festivals, flea markets, anime/culture markets, arts open studios, theatre, and family museum programmes. Return ONLY raw JSON; no markdown.`
 
-  const raw = (await chatComplete({ model: 'gemini-2.5-flash', prompt })).trim()
+  const raw = (
+    await chatComplete({ model: 'gemini-2.5-flash', prompt, feature: 'tsl-events' })
+  ).trim()
   const jsonMatch = raw.match(/\[[\s\S]*\]/)
   if (!jsonMatch) return []
 

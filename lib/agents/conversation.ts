@@ -232,6 +232,7 @@ export async function runConversationTurn(
     model: ORCHESTRATION_MODEL,
     prompt: buildPrompt(input, summarizeBuckets(last.buckets)),
     tools,
+    feature: 'plan-refine',
     maxRounds: 3,
     // Generous budget: the orchestration model (Kimi K2.6 via OpenRouter) is
     // slower than flash, and each apply_changes tool call re-runs planDate
@@ -390,6 +391,7 @@ export async function runIntakeTurn(input: IntakeInput): Promise<IntakeResult> {
     model: ORCHESTRATION_MODEL,
     prompt: buildIntakePrompt(input),
     tools,
+    feature: 'plan-chat',
     maxRounds: 3,
     timeoutMs: 40_000,
   })

@@ -305,6 +305,7 @@ Return ONLY JSON: {"picks":[{"index":0,"why":"..."}]}. Use only the indices show
   const out = await generateJson<{ picks: { index: number; why: string }[] }>({
     model: COPY_MODEL,
     prompt,
+    feature: 'plan-itinerary',
     timeoutMs: 8000,
   })
 

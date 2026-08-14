@@ -109,6 +109,7 @@ export async function verifyBlogExtraction(
       proposerPrompt: proposerPrompt(input),
       skepticPrompt: skepticPrompt(input),
       model: VERIFIER_MODEL,
+      feature: 'blog-verifier',
       timeoutMs: 5000,
     })
   }
@@ -116,6 +117,7 @@ export async function verifyBlogExtraction(
   return verify({
     model: VERIFIER_MODEL,
     prompt: judgePrompt(input),
+    feature: 'blog-verifier',
     timeoutMs: 5000,
   })
 }

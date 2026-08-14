@@ -109,6 +109,7 @@ If none of the relaxations would obviously help, return all four flags false and
   const out = await generateJson<Relaxation>({
     model: TRIAGE_MODEL,
     prompt,
+    feature: 'plan-relaxation',
     timeoutMs: 4000,
   })
   if (!out || !isRelaxation(out)) return NO_RELAXATION

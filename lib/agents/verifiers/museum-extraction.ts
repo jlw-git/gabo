@@ -155,11 +155,12 @@ export async function verifyMuseumExhibition(input: MuseumVerifierInput): Promis
         proposerPrompt: searchProposer(input),
         skepticPrompt: searchSkeptic(input),
         model: VERIFIER_MODEL,
+        feature: 'museum-verifier',
         timeoutMs: 25_000,
         groundWithSearch: true,
       })
     }
-    return verify({ model: VERIFIER_MODEL, prompt: searchJudge(input), timeoutMs: 25_000, groundWithSearch: true })
+    return verify({ model: VERIFIER_MODEL, prompt: searchJudge(input), feature: 'museum-verifier', timeoutMs: 25_000, groundWithSearch: true })
   }
 
   // Page-text path (no grounding needed — the page is the evidence).
@@ -168,8 +169,9 @@ export async function verifyMuseumExhibition(input: MuseumVerifierInput): Promis
       proposerPrompt: pageProposer(input, pageText),
       skepticPrompt: pageSkeptic(input, pageText),
       model: VERIFIER_MODEL,
+      feature: 'museum-verifier',
       timeoutMs: 5000,
     })
   }
-  return verify({ model: VERIFIER_MODEL, prompt: pageJudge(input, pageText), timeoutMs: 5000 })
+  return verify({ model: VERIFIER_MODEL, prompt: pageJudge(input, pageText), feature: 'museum-verifier', timeoutMs: 5000 })
 }

@@ -563,7 +563,7 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
   { "name": "...", "address": "...", "cuisine_tags": [...], "vibe_tags": [...], "opens_at": null, "ends_at": null, "photo_url": null, "is_new_opening": false, "is_limited_run": false, "is_award_winner": false, "award_name": null, "accepts_reservations": null, "alcohol_free": null, "hours": null }
 ]`
 
-  const raw = (await chatComplete({ model: EXTRACTION_MODEL, prompt })).trim()
+  const raw = (await chatComplete({ model: EXTRACTION_MODEL, prompt, feature: 'blog-scanner' })).trim()
   if (!raw) return []
 
   // Tolerate fenced code blocks, leading/trailing prose
@@ -745,7 +745,7 @@ Return ONLY raw JSON — an array (possibly empty), no markdown, no explanation:
   { "name": "...", "address": "...", "experience_tags": [...], "vibe_tags": [...], "starts_at": null, "ends_at": null, "opens_at": null, "photo_url": null, "is_new_opening": false, "is_limited_run": false, "is_outdoor": false }
 ]`
 
-  const raw = (await chatComplete({ model: EXTRACTION_MODEL, prompt })).trim()
+  const raw = (await chatComplete({ model: EXTRACTION_MODEL, prompt, feature: 'blog-scanner' })).trim()
   if (!raw) return []
 
   const jsonMatch = raw.match(/\[[\s\S]*\]/)
