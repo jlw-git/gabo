@@ -77,10 +77,10 @@ export function PlanCard({
 
   return (
     <article
-      className={`group cursor-pointer overflow-hidden rounded-2xl bg-white shadow-sm ring-1 transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 ${ring.base} ${ring.hover}`}
+      className={`group flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl bg-white shadow-sm ring-1 transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 ${ring.base} ${ring.hover}`}
       onClick={() => onOpenDetails(card)}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
+        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
           e.preventDefault()
           onOpenDetails(card)
         }
@@ -89,7 +89,7 @@ export function PlanCard({
       tabIndex={0}
       aria-label={`View details for ${card.name}`}
     >
-      <div className="relative h-40 w-full bg-stone-100">
+      <div className="relative aspect-[16/10] w-full shrink-0 bg-stone-100">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={photoUrlOrFallback(card)}
@@ -167,9 +167,9 @@ export function PlanCard({
         </span>
       </div>
 
-      <div className="space-y-3 p-4">
+      <div className="flex flex-1 flex-col gap-3 p-5">
         <div className="min-w-0">
-          <h3 className="line-clamp-1 text-lg font-semibold tracking-tight">{card.name}</h3>
+          <h3 className="line-clamp-2 text-lg font-semibold leading-snug tracking-tight">{card.name}</h3>
           {card.address && (
             <p className="line-clamp-1 text-sm text-stone-500">{card.address}</p>
           )}
@@ -200,7 +200,7 @@ export function PlanCard({
           </p>
         )}
 
-        <div className="flex gap-2 pt-1" onClick={stop}>
+        <div className="mt-auto flex gap-2 pt-2" onClick={stop}>
           {showPrimaryCta && (
             <button
               onClick={(e) => {

@@ -266,14 +266,21 @@ export default function Home() {
   }
 
   return (
-    <main className="gabo-bg flex min-h-screen w-full flex-col items-center px-4 py-8 md:px-8 md:py-12">
+    <main className="gabo-bg flex min-h-screen w-full flex-col items-center px-5 pb-8 md:px-8">
+      <header className="mb-8 flex w-full max-w-6xl items-center justify-between gap-4 border-b border-stone-300/60 py-5 md:mb-12 md:py-6">
+        <button type="button" onClick={() => setStage({ kind: 'form' })} disabled={stage.kind === 'loading'} aria-label="Gabo home" className="gabo-display text-4xl tracking-[-0.07em] text-brand-dark">gabo<span className="text-brand">.</span></button>
+        <p className="hidden text-xs text-stone-500 sm:block">Made for two. In Singapore.</p>
+        {stage.kind === 'form' && (
+          <a href="#discover" className="rounded-full border border-stone-300 px-4 py-2.5 text-xs font-medium text-stone-700 transition hover:border-brand hover:text-brand">Explore places <span aria-hidden="true">↗</span></a>
+        )}
+      </header>
       {!hydrated && (
         <div className="w-full max-w-md">
           <SkeletonCard />
         </div>
       )}
       {hydrated && stage.kind === 'form' && stored && (
-        <div className="flex w-full max-w-md flex-col gap-12 md:max-w-3xl lg:max-w-5xl lg:gap-16">
+        <div className="flex w-full max-w-6xl flex-col gap-10 lg:gap-14">
           {TASTE_ENABLED && <TasteHint />}
           <PlanDateForm
             onSubmit={handlePlan}
@@ -285,9 +292,9 @@ export default function Home() {
           {CHAT_ENABLED && (
             <button
               onClick={() => setStage({ kind: 'chat' })}
-              className="-mt-6 self-start text-sm font-medium text-stone-500 hover:text-stone-800"
+              className="-mt-5 min-h-11 self-end rounded-full px-2 text-sm font-medium text-stone-600 hover:text-brand"
             >
-              💬 Or plan by chat →
+              Prefer to talk it through? Plan by chat →
             </button>
           )}
           <RecommendationsFeed profile={stored.profile} />
@@ -338,6 +345,10 @@ export default function Home() {
           <ErrorCard message={stage.message} onBack={() => setStage({ kind: 'form' })} />
         </div>
       )}
+      <footer className="mt-14 flex w-full max-w-6xl flex-wrap items-center justify-between gap-3 border-t border-stone-300/60 pt-5 text-xs text-stone-500">
+        <p>A good night starts with a little thought.</p>
+        <p>Gabo · Singapore</p>
+      </footer>
     </main>
   )
 }
@@ -428,8 +439,8 @@ function LoadingCard() {
   }, [])
 
   return (
-    <div className="flex flex-col items-center gap-4 rounded-2xl bg-white p-10 ring-1 ring-stone-200">
-      <div className="h-10 w-10 animate-spin rounded-full border-4 border-rose-200 border-t-rose-600" />
+    <div role="status" aria-live="polite" className="flex flex-col items-center gap-4 rounded-2xl bg-white p-10 ring-1 ring-stone-200">
+      <div aria-hidden="true" className="h-10 w-10 animate-spin rounded-full border-4 border-brand-soft border-t-brand" />
       <p className="text-sm text-stone-600 transition-all duration-300">{LOADING_STEPS[step]}</p>
     </div>
   )

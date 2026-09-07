@@ -1,8 +1,10 @@
 # Gabo
 
-A 60-second date-night planner for busy couples in Singapore.
+A date planner for two people in Singapore.
 
-Time-strapped planners spend ~30 minutes per date night juggling tabs to find places that are open, fresh, and fair to both commutes. Gabo compresses that into a single tap: a curated shortlist of dining and events where each partner's ETA feels fair — with pop-ups, new openings, and critic picks surfaced alongside the usual suspects.
+Gabo brings dinner and things to do into one shortlist, with personal preferences and both starting points in mind. Choose an idea, compare journeys, and prepare a suggestion to share. The planning screen requires only a date; food preferences, budget, occasions and notes are optional.
+
+The 60-second decision is a proposed usability target, not a measured guarantee. See the [product requirements and release gaps](Gabo_prd.md) for the current product contract.
 
 > Originally built for the GrabMaps API Hackathon. **Post-hackathon, GrabMaps has been retired** — [OneMap](https://www.onemap.gov.sg/) (Singapore Land Authority) now powers all POI search and routing.
 

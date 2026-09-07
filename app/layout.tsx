@@ -11,21 +11,20 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: 'Gabo — date nights, fair & fresh',
-  description: 'A 60-second date-night planner for Singapore households.',
+  title: 'Gabo — less planning, more us time',
+  description: 'Find dinner and things to do in Singapore, with your tastes and both journeys in mind. Build a shortlist and share your next date idea.',
 }
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  themeColor: '#fff1f2',
+  themeColor: '#f8f5ef',
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`h-full antialiased ${inter.variable}`}>
-      <body className="min-h-full flex flex-col bg-stone-50 text-stone-900">{children}</body>
+      <body className="min-h-full flex flex-col bg-background text-stone-900">{children}</body>
     </html>
   )
 }

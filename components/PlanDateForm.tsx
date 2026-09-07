@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { Override, Profile, VibeTag } from '@/lib/planner/types'
 import { PlaceSearchInput, type PlaceSelection } from './PlaceSearchInput'
+import { sgDateKey, sgHourMinute } from '@/lib/planner/sg-time'
 
 export type PlanQualityPatch = Pick<
   Profile,
@@ -33,48 +34,6 @@ type Props = {
 const OCCASION_CHIPS: { tag: Override; label: string }[] = [
   { tag: 'anniversary', label: 'Anniversary' },
   { tag: 'birthday', label: 'Birthday' },
-]
-
-const INTENT_PRESETS: {
-  key: string
-  label: string
-  hint: string
-  cuisines: string[]
-  vibes: VibeTag[]
-  budgets: number[]
-}[] = [
-  {
-    key: 'dinner_event',
-    label: 'Dinner + event',
-    hint: 'Balanced shortlist for a whole evening.',
-    cuisines: ['modern_european', 'cocktail'],
-    vibes: ['celebratory', 'adventurous'],
-    budgets: [],
-  },
-  {
-    key: 'special_dinner',
-    label: 'Special dinner',
-    hint: 'Polished, reservation-worthy places.',
-    cuisines: ['modern_european', 'french', 'omakase'],
-    vibes: ['celebratory', 'cozy'],
-    budgets: [3, 4],
-  },
-  {
-    key: 'new_buzzy',
-    label: 'New or buzzy',
-    hint: 'Recent openings, pop-ups, critic picks.',
-    cuisines: ['cocktail', 'bar', 'dessert'],
-    vibes: ['adventurous', 'celebratory'],
-    budgets: [],
-  },
-  {
-    key: 'easy_quality',
-    label: 'Easy but good',
-    hint: 'Comfortable, lower-friction picks.',
-    cuisines: ['japanese', 'italian', 'cafe'],
-    vibes: ['cozy', 'low_key'],
-    budgets: [2, 3],
-  },
 ]
 
 const CUISINE_CHIPS = [
@@ -115,11 +74,12 @@ export function PlanDateForm({
   const [time, setTime] = useState(defaultDateTime())
   const [occasion, setOccasion] = useState<Override[]>([])
   const [customOccasion, setCustomOccasion] = useState('')
-  const [intent, setIntent] = useState(INTENT_PRESETS[0].key)
   const [cuisines, setCuisines] = useState<string[]>([])
   const [vibes, setVibes] = useState<VibeTag[]>([])
   const [budgets, setBudgets] = useState<number[]>([])
   const [avoids, setAvoids] = useState('')
+  const [preferencesOpen, setPreferencesOpen] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
   const [freeformOpen, setFreeformOpen] = useState(false)
   const [freeform, setFreeform] = useState('')
@@ -136,10 +96,15 @@ export function PlanDateForm({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!canSubmit) return
+    if (!canSubmit || disabled) return
+    const scheduled = new Date(`${time}:00+08:00`)
+    if (!Number.isFinite(scheduled.getTime()) || scheduled.getTime() <= Date.now()) {
+      setFormError('Choose an upcoming date and time in Singapore.')
+      return
+    }
+    setFormError(null)
     const custom = customOccasion.trim()
     const override_tags: string[] = [...occasion, ...(custom ? [custom] : [])]
-    const preset = INTENT_PRESETS.find((p) => p.key === intent) ?? INTENT_PRESETS[0]
     const avoided = avoids
       .split(',')
       .map((item) => item.trim().toLowerCase().replace(/\s+/g, '_'))
@@ -147,15 +112,15 @@ export function PlanDateForm({
     onSubmit({
       start_a: youStart ? { lat: youStart.lat, lng: youStart.lng } : null,
       start_b: partnerStart ? { lat: partnerStart.lat, lng: partnerStart.lng } : null,
-      scheduled_for: new Date(time).toISOString(),
+      scheduled_for: scheduled.toISOString(),
       override_tags,
       startADetails: youStart,
       startBDetails: partnerStart,
       profilePatch: {
-        cuisines_loved: [...new Set([...preset.cuisines, ...cuisines])],
+        cuisines_loved: cuisines,
         cuisines_avoided: [...new Set(avoided)],
-        vibe_defaults: [...new Set([...preset.vibes, ...vibes])],
-        budget_bands: [...new Set([...preset.budgets, ...budgets])],
+        vibe_defaults: vibes,
+        budget_bands: budgets,
       },
       freeform: freeform.trim(),
     })
@@ -165,158 +130,88 @@ export function PlanDateForm({
   const partnerLabel = partnerName?.trim() ? `${partnerName}'s start` : 'Their start'
 
   return (
-    <section className="space-y-8">
-      <header className="space-y-3 text-center">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-600">Gabo</p>
-        <h1 className="text-3xl font-semibold tracking-tight md:text-4xl lg:text-5xl">
-          When are you two heading out?
+    <section id="planner" aria-labelledby="planner-title" className="grid scroll-mt-8 gap-7 lg:grid-cols-[0.8fr_1.2fr] lg:gap-14">
+      <header className="flex flex-col items-start pt-2 lg:pt-6">
+        <p className="gabo-eyebrow">Your next date, sorted</p>
+        <h1 id="planner-title" className="gabo-display mt-4 text-[2.8rem] leading-[1.06] tracking-[-0.045em] sm:text-6xl lg:text-[4.5rem]">
+          Less planning.<br />
+          <span className="text-brand">More us time.</span>
         </h1>
-        <p className="mx-auto max-w-xl text-sm text-stone-500 md:text-base">
-          Tell us when and where you&rsquo;re each starting from. We&rsquo;ll find date spots that work for both of you in 60 seconds.
+        <p className="mt-5 max-w-sm text-base leading-relaxed text-stone-600">
+          Find dinner and something to do in Singapore, with your tastes and both journeys in mind.
         </p>
+        <div className="mt-7 hidden w-full max-w-sm border-t border-stone-300/70 pt-6 lg:block">
+          <p className="text-sm font-semibold">A little thought goes a long way.</p>
+          <ul className="mt-4 space-y-4 text-sm text-stone-600">
+            <li className="flex gap-3"><span className="text-brand" aria-hidden="true">01</span> Discover dinner spots and things to do.</li>
+            <li className="flex gap-3"><span className="text-brand" aria-hidden="true">02</span> Compare the journey for each of you.</li>
+            <li className="flex gap-3"><span className="text-brand" aria-hidden="true">03</span> Save a favourite. Share the idea.</li>
+          </ul>
+        </div>
+        <p className="mt-6 text-xs text-stone-500 lg:mt-8">No account needed. Just a reason to go out.</p>
       </header>
 
-      <form
-        onSubmit={handleSubmit}
-        className="rounded-3xl bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)] ring-1 ring-stone-200 md:p-5"
-      >
-        <div className="grid gap-3 md:grid-cols-[minmax(180px,0.8fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end md:gap-2">
-          <Field label="When">
-            <input
-              id="when"
-              type="datetime-local"
-              value={time}
-              onChange={(e) => setTime(e.target.value)}
-              className="h-11 w-full rounded-xl bg-stone-50 px-3 text-sm ring-1 ring-stone-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-300"
-            />
-          </Field>
-
-          <Field label={youLabel} hint="Optional">
-            <PlaceSearchInput
-              id="you-start"
-              label=""
-              placeholder="e.g. Raffles Place"
-              value={youStart}
-              onChange={setYouStart}
-            />
-          </Field>
-
-          <Field label={partnerLabel} hint="Optional">
-            <PlaceSearchInput
-              id="partner-start"
-              label=""
-              placeholder="e.g. Jurong East MRT"
-              value={partnerStart}
-              onChange={setPartnerStart}
-            />
-          </Field>
-
-          <button
-            type="submit"
-            disabled={!canSubmit || disabled}
-            className="h-11 rounded-xl bg-stone-900 px-6 text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-stone-300 md:min-w-[120px]"
-          >
-            {disabled ? 'Finding…' : 'Plan it'}
-          </button>
+      <form onSubmit={handleSubmit} className="gabo-planner min-w-0 rounded-[1.75rem] border border-stone-200 bg-white p-5 sm:p-7">
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <h2 className="text-xl font-semibold tracking-tight">Make time for two</h2>
+          <span className="hidden rounded-full bg-[#f5f1ea] px-3 py-1.5 text-[11px] font-medium text-stone-600 sm:inline-flex">Dinner + things to do</span>
         </div>
+        <Field label="When are you heading out?" hint="Singapore time" htmlFor="when">
+          <input
+            id="when"
+            type="datetime-local"
+            required
+            value={time}
+            onChange={(e) => { setTime(e.target.value); setFormError(null) }}
+            aria-invalid={!!formError}
+            aria-describedby={formError ? 'plan-error' : undefined}
+            className="gabo-input h-12 w-full min-w-0 rounded-xl bg-stone-50 px-3 text-sm ring-1 ring-stone-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        </Field>
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <Field label={youLabel} hint="Optional" htmlFor="you-start">
+            <PlaceSearchInput id="you-start" label="" placeholder="e.g. Raffles Place MRT" value={youStart} onChange={setYouStart} />
+          </Field>
+          <Field label={partnerLabel} hint="Optional" htmlFor="partner-start">
+            <PlaceSearchInput id="partner-start" label="" placeholder="e.g. Jurong East MRT" value={partnerStart} onChange={setPartnerStart} />
+          </Field>
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-stone-500" aria-live="polite">
+          {youStart && partnerStart
+            ? 'Both starts added. We’ll weigh up the travel time for each of you.'
+            : youStart || partnerStart
+              ? 'One start added. Add the other to compare both journeys.'
+              : 'Add both starts to compare journeys, or leave blank to explore islandwide.'}
+        </p>
 
-        {youStart && partnerStart && (
-          <p className="mt-3 text-xs text-stone-500">
-            We&rsquo;ll favour spots roughly midway between you both.
-          </p>
-        )}
+        <fieldset className="mt-6 border-t border-stone-100 pt-5">
+          <legend className="sr-only">Your mood</legend>
+          <p className="mb-3 text-sm font-medium">What’s the mood? <span className="font-normal text-stone-500">Optional</span></p>
+          <div className="flex flex-wrap gap-2">
+            <ChipButton selected={vibes.length === 0} onClick={() => setVibes([])}>Open to anything</ChipButton>
+            {VIBE_CHIPS.map((chip) => (
+              <ChipButton key={chip.value} selected={vibes.includes(chip.value)} onClick={() => toggleList(chip.value, setVibes)}>{chip.label}</ChipButton>
+            ))}
+          </div>
+        </fieldset>
 
-        <div className="mt-5 border-t border-stone-100 pt-4">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h2 className="text-sm font-semibold tracking-tight text-stone-900">Quality brief</h2>
-              <p className="text-xs text-stone-500">A few signals help Gabo rank the dining and event mix.</p>
+        <button type="button" onClick={() => setPreferencesOpen((o) => !o)} aria-expanded={preferencesOpen} aria-controls="plan-preferences" className="mt-4 flex min-h-11 w-full items-center justify-between gap-2 text-left text-sm font-medium text-stone-600 hover:text-brand">
+          <span>Food preferences & budget{cuisines.length + budgets.length + (avoids.trim() ? 1 : 0) > 0 ? ' · added' : ''}</span>
+          <span aria-hidden="true">{preferencesOpen ? '−' : '+'}</span>
+        </button>
+        <div id="plan-preferences" hidden={!preferencesOpen}>
+          <fieldset className="mt-2">
+            <legend className="mb-3 text-xs font-medium text-stone-600">Cuisines you enjoy</legend>
+            <div className="flex flex-wrap gap-2">
+              {CUISINE_CHIPS.map((chip) => (
+                <ChipButton key={chip.value} selected={cuisines.includes(chip.value)} onClick={() => toggleList(chip.value, setCuisines)}>{chip.label}</ChipButton>
+              ))}
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setIntent(INTENT_PRESETS[0].key)
-                setCuisines([])
-                setVibes([])
-                setBudgets([])
-                setAvoids('')
-              }}
-              className="self-start rounded-full px-2 py-1 text-xs font-medium text-stone-500 hover:text-stone-800 sm:self-auto"
-            >
-              Reset
-            </button>
-          </div>
-
-          <div className="mt-3 grid gap-2 md:grid-cols-4">
-            {INTENT_PRESETS.map((preset) => {
-              const on = intent === preset.key
-              return (
-                <button
-                  key={preset.key}
-                  type="button"
-                  onClick={() => setIntent(preset.key)}
-                  className={`rounded-xl p-3 text-left ring-1 transition ${
-                    on
-                      ? 'bg-stone-900 text-white ring-stone-900'
-                      : 'bg-stone-50 text-stone-700 ring-stone-200 hover:bg-white'
-                  }`}
-                  aria-pressed={on}
-                >
-                  <span className="block text-sm font-semibold">{preset.label}</span>
-                  <span className={`mt-1 block text-xs leading-snug ${on ? 'text-stone-200' : 'text-stone-500'}`}>
-                    {preset.hint}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-
-          <div className="mt-4 grid gap-4 md:grid-cols-[1.15fr_1fr]">
+          </fieldset>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 sm:items-end">
             <div>
               <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-stone-500">
-                Dining priorities
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {CUISINE_CHIPS.map((chip) => {
-                  const on = cuisines.includes(chip.value)
-                  return (
-                    <ChipButton
-                      key={chip.value}
-                      selected={on}
-                      onClick={() => toggleList(chip.value, setCuisines)}
-                    >
-                      {chip.label}
-                    </ChipButton>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div>
-              <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-stone-500">
-                Mood
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {VIBE_CHIPS.map((chip) => {
-                  const on = vibes.includes(chip.value)
-                  return (
-                    <ChipButton
-                      key={chip.value}
-                      selected={on}
-                      onClick={() => toggleList(chip.value, setVibes)}
-                    >
-                      {chip.label}
-                    </ChipButton>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-[minmax(180px,0.55fr)_1fr] md:items-end">
-            <div>
-              <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-stone-500">
-                Budget comfort
+                Dining price range
               </p>
               <div className="flex gap-2">
                 {BUDGET_CHIPS.map((chip) => {
@@ -335,7 +230,7 @@ export function PlanDateForm({
             </div>
             <label className="block">
               <span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-stone-500">
-                Avoid
+                Cuisines to avoid
               </span>
               <input
                 type="text"
@@ -347,24 +242,25 @@ export function PlanDateForm({
               />
             </label>
           </div>
+          <button type="button" onClick={() => { setCuisines([]); setBudgets([]); setAvoids('') }} className="mt-2 min-h-11 text-xs font-medium text-stone-600 underline underline-offset-4">Clear food preferences</button>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setMoreOpen((o) => !o)}
-            className="rounded-full px-2 py-1 text-xs font-medium text-stone-500 hover:text-stone-800"
+            className="min-h-11 rounded-full py-2 pr-3 text-xs font-medium text-stone-600 hover:text-brand"
             aria-expanded={moreOpen}
           >
-            {moreOpen ? 'Less options ▴' : 'Special occasion? ▾'}
+            {moreOpen ? 'Hide occasion −' : 'Special occasion +'}
           </button>
           <button
             type="button"
             onClick={() => setFreeformOpen((o) => !o)}
-            className="rounded-full px-2 py-1 text-xs font-medium text-stone-500 hover:text-stone-800"
+            className="min-h-11 rounded-full py-2 pr-3 text-xs font-medium text-stone-600 hover:text-brand"
             aria-expanded={freeformOpen}
           >
-            {freeformOpen ? 'Hide notes ▴' : 'Describe it in your own words ▾'}
+            {freeformOpen ? 'Hide notes −' : 'Add a note +'}
           </button>
           {!moreOpen &&
             occasion.map((tag) => (
@@ -387,9 +283,10 @@ export function PlanDateForm({
                     type="button"
                     key={c.tag}
                     onClick={() => toggle(c.tag)}
+                    aria-pressed={on}
                     className={`rounded-full px-3 py-1.5 text-xs font-medium ring-1 transition ${
                       on
-                        ? 'bg-rose-50 text-rose-700 ring-rose-300'
+                        ? 'bg-brand-soft text-brand-dark ring-brand/40'
                         : 'bg-white text-stone-700 ring-stone-200 hover:bg-stone-50'
                     }`}
                   >
@@ -399,6 +296,7 @@ export function PlanDateForm({
               })}
               <input
                 type="text"
+                aria-label="Other occasion"
                 value={customOccasion}
                 onChange={(e) => setCustomOccasion(e.target.value)}
                 placeholder="Something else? proposal, reunion, first date…"
@@ -412,6 +310,7 @@ export function PlanDateForm({
         {freeformOpen && (
           <div className="mt-3 border-t border-stone-100 pt-3">
             <textarea
+              aria-label="Notes for your date"
               value={freeform}
               onChange={(e) => setFreeform(e.target.value)}
               placeholder="Anniversary dinner near Marina Bay, my wife loves Italian, no seafood…"
@@ -420,10 +319,16 @@ export function PlanDateForm({
               className="w-full resize-none rounded-xl bg-stone-50 px-3 py-2 text-sm ring-1 ring-stone-200 placeholder:text-stone-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-300"
             />
             <p className="mt-1.5 text-[11px] text-stone-400">
-              We&rsquo;ll interpret this and pre-fill anything we can — your chips above always win.
+              Notes can add preferences to your search. Use the choices above for specific preferences.
             </p>
           </div>
         )}
+        {formError && <p id="plan-error" role="alert" className="mt-3 text-sm text-red-700">{formError}</p>}
+        <button type="submit" disabled={!canSubmit || disabled} className="mt-4 flex min-h-12 w-full items-center justify-between rounded-xl bg-brand px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-brand-dark active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-stone-300">
+          <span>{disabled ? 'Finding your date spots…' : 'Find our date spots'}</span>
+          <span aria-hidden="true">↗</span>
+        </button>
+        <p className="mt-3 text-center text-[11px] leading-relaxed text-stone-500">A shortlist to choose from. Book directly with the venue.</p>
       </form>
     </section>
   )
@@ -431,17 +336,19 @@ export function PlanDateForm({
 
 function Field({
   label,
+  htmlFor,
   hint,
   children,
 }: {
   label: string
+  htmlFor: string
   hint?: string
   children: React.ReactNode
 }) {
   return (
     <div className="space-y-1">
       {label && (
-        <label className="flex items-baseline gap-1.5 text-[11px] font-medium uppercase tracking-wider text-stone-500">
+        <label htmlFor={htmlFor} className="mb-2 flex flex-wrap items-baseline gap-1.5 text-xs font-medium text-stone-700">
           <span>{label}</span>
           {hint && <span className="text-[10px] font-normal normal-case tracking-normal text-stone-400">{hint}</span>}
         </label>
@@ -464,9 +371,9 @@ function ChipButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+      className={`min-h-10 rounded-full px-3.5 py-2 text-xs font-medium ring-1 transition ${
         selected
-          ? 'bg-rose-50 text-rose-700 ring-rose-300'
+          ? 'bg-brand-soft text-brand-dark ring-brand/40'
           : 'bg-white text-stone-700 ring-stone-200 hover:bg-stone-50'
       }`}
       aria-pressed={selected}
@@ -476,11 +383,10 @@ function ChipButton({
   )
 }
 
-// Default to tonight at 19:30; if it's already past 18:00, default to tomorrow.
+// The input and API payload always describe Singapore time, including abroad.
 function defaultDateTime(): string {
-  const d = new Date()
-  if (d.getHours() >= 18) d.setDate(d.getDate() + 1)
-  d.setHours(19, 30, 0, 0)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  const now = new Date()
+  const day = new Date(`${sgDateKey(now)}T00:00:00+08:00`)
+  if (sgHourMinute(now).hour >= 18) day.setUTCDate(day.getUTCDate() + 1)
+  return `${sgDateKey(day)}T19:30`
 }

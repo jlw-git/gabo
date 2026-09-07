@@ -74,7 +74,13 @@ export function RecommendationsFeed({ profile }: Props) {
         return (await res.json()) as Recommendations
       })
       .then((data) => {
-        if (!cancelled) setRecs(data)
+        if (!cancelled) {
+          setRecs(data)
+          const cards = [...data.limited, ...data.new, ...data.trending]
+          if (!cards.some((card) => card.bucket === 'dining') && cards.some((card) => card.bucket === 'event')) {
+            setTab('events')
+          }
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load')
@@ -129,11 +135,22 @@ export function RecommendationsFeed({ profile }: Props) {
   const plannerLabel = profile.planner_name?.trim() || 'You'
   const partnerLabel = profile.partner_name?.trim() || 'Partner'
 
-  if (error) return null
+  if (error || (recs && allCards.length === 0)) {
+    return (
+      <section id="discover" aria-labelledby="discover-title" className="scroll-mt-8 border-t border-stone-300/70 pt-8">
+        <p className="gabo-eyebrow">A little inspiration</p>
+        <h2 id="discover-title" className="gabo-display mt-2 text-3xl tracking-tight">Your next “let’s go here.”</h2>
+        <p role="status" className="mt-4 text-sm text-stone-600">
+          {error ? 'We couldn’t load places to explore right now.' : 'No places to browse just yet.'} You can still try the planner for your date.
+        </p>
+        <a href="#planner" className="mt-3 inline-flex min-h-11 items-center text-sm font-medium text-brand-dark underline underline-offset-4">Plan a date ↑</a>
+      </section>
+    )
+  }
 
   if (!recs) {
     return (
-      <div className="space-y-5">
+      <div id="discover" role="status" aria-label="Loading places to explore" className="scroll-mt-8 space-y-5">
         <div className="border-t border-stone-200 pt-7">
           <div className="h-6 w-48 animate-pulse rounded bg-stone-200" />
           <div className="mt-1.5 h-4 w-72 animate-pulse rounded bg-stone-100" />
@@ -144,7 +161,7 @@ export function RecommendationsFeed({ profile }: Props) {
             <div key={i} className="h-8 w-20 animate-pulse rounded-full bg-stone-100" />
           ))}
         </div>
-        <div className="space-y-3 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 lg:grid-cols-3">
+        <div className="space-y-3 md:grid md:grid-cols-2 md:gap-5 md:space-y-0 lg:grid-cols-3">
           {[0, 1, 2].map((i) => (
             <div
               key={i}
@@ -156,18 +173,17 @@ export function RecommendationsFeed({ profile }: Props) {
     )
   }
 
-  if (allCards.length === 0) return null
-
   const otherTabHasContent =
     (tab === 'dining' ? eventsCards.length : diningCards.length) > 0
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-end justify-between gap-3 border-t border-stone-200 pt-7">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold tracking-tight">Right now in Singapore</h2>
-          <p className="text-xs text-stone-500">
-            A quick taste of what&rsquo;s on. Use the planner above for a tailored shortlist.
+    <section id="discover" aria-labelledby="discover-title" className="scroll-mt-8 space-y-5">
+      <div className="flex items-end justify-between gap-3 border-t border-stone-300/70 pt-8">
+        <div className="space-y-2">
+          <p className="gabo-eyebrow">A little inspiration</p>
+          <h2 id="discover-title" className="gabo-display text-3xl tracking-tight md:text-4xl">Your next “let’s go here.”</h2>
+          <p className="max-w-xl text-sm leading-relaxed text-stone-500">
+            Browse Singapore dining and things to do. Plan above to match your date, tastes and journeys.
           </p>
         </div>
       </div>
@@ -282,7 +298,7 @@ export function RecommendationsFeed({ profile }: Props) {
           </div>
         </div>
       ) : (
-        <div className="space-y-3 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 lg:grid-cols-3">
+        <div className="space-y-3 md:grid md:grid-cols-2 md:gap-5 md:space-y-0 lg:grid-cols-3">
           {activeCards.map((card) => (
             <PlanCard
               key={card.id}
@@ -326,7 +342,7 @@ export function RecommendationsFeed({ profile }: Props) {
           onClose={() => setShared(null)}
         />
       )}
-    </div>
+    </section>
   )
 }
 

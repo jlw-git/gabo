@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-background: #fafaf9;
+  --color-background: #f8f5ef;
   --color-foreground: #1c1917;
+  --color-brand: #b94b35;
+  --color-brand-dark: #963a29;
+  --color-brand-soft: #fbede6;
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: "SFMono-Regular", "Cascadia Code", ui-monospace, monospace;
 }
@@ -13,7 +16,41 @@ html, body {
   font-family: var(--font-sans);
 }
 
-/* Subtle gradient backdrop for the phone-framed demo */
 .gabo-bg {
-  background: radial-gradient(ellipse at top, #fff1f2 0%, #fafaf9 45%, #fafaf9 100%);
+  background: var(--color-background);
+}
+
+.gabo-display {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 400;
+}
+
+.gabo-eyebrow {
+  color: var(--color-brand-dark);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.gabo-planner {
+  box-shadow: 0 8px 32px -16px rgb(75 48 27 / 16%);
+}
+
+:where(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 4px;
+}
+
+button:not(:disabled), summary {
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
