@@ -1,47 +1,108 @@
 # PRD — Gabo
-**Find a great place to eat and an activity to do after**
-Owner: PM | Status: Hackathon v2 (2026-04-24) | Target: GrabMaps API Hackathon submission
+**Less planning. More us time.**
+Owner: Product | Status: Product value and UX revision | Reviewed: 2026-09-07
+
+## 1. Product decision
+
+**Value proposition:** For the person planning a date in Singapore, Gabo brings dinner and things to do into one shortlist, with personal preferences and both starting points in mind, so they can choose a thoughtful idea and share it with their partner.
+
+The product should earn trust by making a decision easier. More venues, AI features, or clicks are not success in themselves.
+
+### 1.1 Audience and job to be done
+
+**Primary user:** A busy person planning an evening with their partner, often starting from different places. They want something enjoyable without doing all the research or asking their partner to install another app.
+
+**Job:** “When we have a free evening, help me choose somewhere we will both enjoy and can reasonably get to, so I can send a concrete suggestion instead of another ‘where should we go?’ message.”
+
+**Trigger:** A free evening, a planned date, or a special occasion. **Successful outcome:** the planner chooses a viable venue or evening and prepares a shareable suggestion. A provider click is not proof of a reservation, and opening a share sheet is not proof a message was sent.
+
+**Secondary use:** Browse for inspiration and save ideas before choosing a date. Discovery supports planning; it must not become an endless feed that replaces the decision.
+
+**Outside the initial focus:** tourists building multi-day trips, large groups, partner accounts, payments, automatic reservations, and cross-device collaboration.
+
+### 1.2 Why choose Gabo?
+
+These are positioning hypotheses to test with users, not externally validated competitor claims.
+
+| Existing approach | Unfinished job | Gabo's differentiated value | Evidence the interface must show |
+|---|---|---|---|
+| Food or lifestyle articles | Turn inspiration into an option for a specific evening | Date-aware dinner and activity discovery | Event dates, hours provenance, source link |
+| Map searches | Compare the effort for two people | Both journeys in the same comparison | Per-person ETA, mode, and clear estimates |
+| Booking directories | Decide what suits the couple before booking | Taste-aware shortlist with a reason to choose each option | A concrete match reason, price band, actionable next step |
+| Messaging back and forth | Turn options into a clear suggestion | Save and prepare a plan to share | Venue, selected date/time, address, and useful links |
+
+The original “30 minutes to 60 seconds” statement has no research or measurement attached in this repository. Treat 60 seconds as a **usability target**, not a customer-facing guarantee. Do not claim confirmed opening hours, equal commutes, live inventory, or completed bookings when the data cannot establish them.
+
+### 1.3 Review findings and decisions
+
+| Finding | Product consequence | Decision |
+|---|---|---|
+| PRD mixes a hackathon brief, architecture, and shipped UI details | Teams can ship features without knowing which user outcome matters | Make sections 1–2 the product contract; retain technical detail below for reference |
+| Default “Dinner + event” preset added European/cocktail preferences; other presets inferred price restrictions | First-time results can be biased without a choice by the user | Remove implicit cuisine and budget presets; mood chips map directly to selected moods |
+| “Quality brief” exposed many chips before the user had seen value | More work than a simple planning promise suggests | Date and optional starts first; disclose food preferences, budget, occasion and notes progressively |
+| Fairness is a differentiator, but optional starts do not explain its benefit | People may skip the inputs needed to experience it | Explain the difference between zero, one and two starts at the input |
+| Operational history contradicts earlier requirements (GrabMaps, simulated transit, onboarding) | The specification is unreliable | Correct those references; date operational snapshots and verify them before release |
+| Source freshness, booking links, and silent constraint widening can undermine confidence | A polished shortlist can still lead to a failed evening | Put trust requirements ahead of additional AI features |
+
+### 1.4 Priorities and release policy
+
+**P0:** Make a credible first choice: low-friction input, relevant shortlist, understandable journeys, trustworthy venue facts, and honest handoff. **P1:** Improve full-evening composition, preference control, and learning from repeat use. **P2:** Expand sources and distribution only after quality and repeat use are established.
+
+The current frontend revision implements the planning simplification and visual hierarchy. It does **not** complete every release requirement below. “Partial” and “gap” rows are explicit backlog items; they must not be represented as shipped guarantees.
+
+## 2. Requirements and validation
+
+### 2.1 Outcome-based requirements
+
+| ID / priority | Requirement and user value | Acceptance criteria | State after this revision |
+|---|---|---|---|
+| R1 · P0 | Start without setup | No account or quiz gate. Only a future date/time is required. Date input and submitted instant use Singapore time even on a device abroad. No cuisine, price or mood inferred from an untouched form. | Implemented in frontend; existing saved preferences still apply |
+| R2 · P0 | Explain why starts matter | Zero starts: islandwide with no fairness claim. One: explain that adding the other enables comparison. Two: show both per-person journeys in results. Missing routing must never look like a zero-minute trip. | Form messaging implemented; existing ETA failure/fallback behavior needs audit |
+| R3 · P0 | Reduce the comparison burden | Keep dining and activities distinct. Show name, source, why it fits, price band and time-sensitive facts; initially show up to six per category and allow narrowing. A user can identify a suitable next action without opening several cards. | Existing categories, filters and reasons; price visibility and decision burden need validation |
+| R4 · P0 | Make confidence visible | Show whether hours are confirmed, extracted, defaulted or unknown. Expired event runs are excluded. Estimated transit is labeled. A missing source or stale record must not imply verification. | Partial: filtering, sources and ETA labeling exist; per-card hours provenance is a gap |
+| R5 · P0 | Make the next action honest | Label actual booking destinations versus a search fallback. Walk-in-only venues must not suggest reservable inventory. Opening a provider page must never mark a booking complete. Share content must not assert a reservation without user confirmation. | Partial: provider handoff and walk-in handling exist; fallback labels and confirmation semantics need audit |
+| R6 · P0 | Recover without starting over | Loading is announced, errors offer retry/edit, and empty results offer concrete alternatives. Returning to edit preserves the current date, starts and explicit preferences. Discovery failure has visible recovery. | Loading and discovery states improved; full draft preservation is a gap |
+| R7 · P0 | Support mobile and keyboard use | At 360px, no horizontal page overflow; readable labels, visible focus, named inputs, keyboard place selection, reduced-motion support and browser zoom. Primary action remains easy to reach. | Frontend updated; validate against the device checklist below |
+| R8 · P0 | Respect explicit constraints | Hard dietary constraints never relax. Budget/avoid widening requires an understandable notice and a way to keep original constraints. No hidden preset should widen a selected budget. | Preset issue removed; existing automatic widening and triage merges need a separate control/notice pass |
+| R9 · P1 | Compose a feasible evening | Dinner plus activity has a reachable start time, visit duration and travel buffer. Explain when no pair is feasible; do not fabricate one. Enable sharing the whole evening, not just a venue. | Existing feasibility-based Evening view; complete-evening sharing is a gap |
+| R10 · P1 | Help returning users with control | Reuse useful starts, saved venues and tastes. Make inferred preferences understandable and resettable. Explicit choices override learned signals. Saved content is described as device-local until account sync exists. | Existing local memory; unified review/reset and preference precedence need validation |
+
+**Core journey:** choose when → optionally add both starts and mood → “Find our date spots” → compare dining/activities and journeys → inspect or save a favourite → open the provider or prepare a share. Chat is an alternate input path; it does not compete with the primary form. The Evening view is an optional continuation, not a promise made by a preset.
+
+**Browsing:** “Explore places” scrolls to discovery below the form. Discovery is inspiration, not availability for the chosen date. It must have a visible loading, empty, or failure state rather than silently disappearing.
+
+### 2.2 Success measures
+
+All thresholds below are **proposed pilot gates**, not measured results. Product owns user research and the dashboard; engineering owns event accuracy and reliability. Baseline the existing experience before evaluating the revision.
+
+**Primary metric — useful-choice rate:** percentage of sessions with rendered, nonempty planning results that lead to a save, copied suggestion, or provider link opened within 10 minutes. Deduplicate to one success per session. This is a proxy; follow-up research must confirm whether the suggestion was actually useful.
+
+| Measure | Definition | Proposed pilot gate |
+|---|---|---|
+| Useful-choice rate | Successful sessions / sessions with nonempty results | ≥50% after 100 eligible pilot sessions; report numerator and denominator |
+| Time to first useful choice | First form interaction to first successful action; do not hide abandoned sessions | Median ≤60s among successes; publish abandonment alongside it |
+| Result reliability | Valid plan requests returning a usable nonempty shortlist | ≥90% over a fixed supported-date/constraint fixture set; report legitimately impossible requests separately |
+| Trust | Audited surfaced records with wrong run dates, unsupported availability or broken action links | Zero critical errors in a 30-record pre-release sample; fix and resample affected sources |
+| Repeat value | Activated pilot planners making another plan within 28 days | ≥25% of users eligible for the full 28-day window |
+| Request performance | Submit to results rendered, including optional interpretation | p95 ≤15s under pilot load; do not conflate backend latency with decision time |
+
+**Instrumentation backlog:** `plan_started`, `plan_submitted`, `plan_results_shown`, `plan_failed`, `venue_saved`, `share_opened`, `share_copied`, `provider_opened`, `plan_refined`. Use a session/request ID, elapsed time, result count, number of starts and failure category. Do not collect raw notes, exact starting coordinates or partner names for product analytics. A share-open event never counts as a sent message. Existing shortlist logging alone does not measure this funnel. Returning-user measurement requires an appropriate pseudonymous identifier and disclosure; cross-device retention remains unavailable without identity.
+
+**Guardrails:** monitor zero-result rate, request failure rate, unsupported-fact reports and model/routing cost per useful choice. Establish the cost baseline before setting a financial gate; more model calls are justified only by better outcomes. Do not optimize provider clicks at the expense of relevance or undisclosed promotion.
+
+### 2.3 Research and release checklist
+
+1. Recruit 8–10 people who regularly plan dates in Singapore. Ask about their last real planning episode before showing Gabo; verify the pain and current time spent.
+2. Test a weekday date from two origins, an islandwide search, and an occasion with a specific budget. Counterbalance old/new UI order. Record first-choice time, completion, confusion, and whether the user can explain each journey and the booking handoff.
+3. Ask participants to select an idea they would actually send. Treat comprehension and suitability as evidence; visual preference alone is insufficient.
+4. Run keyboard-only planning plus 360px mobile, tablet and desktop checks. Exercise optional disclosures, origin selection/editing, invalid/past date, loading, empty results, failures, saved state and provider destinations. Use controlled fixtures for interaction tests and separately audit live data.
+5. Product and engineering resolve the P0 trust gaps before broad release, then instrument a pilot. Review results after 100 eligible sessions and retention once the 28-day cohort matures. If discovery is popular but useful-choice rate stays low, improve selection quality before adding features.
+
+**Business hypothesis:** Repeat planning is the first proof of value. Monetization is not committed. Any later referral model must disclose commercial relationships and preserve relevance; test willingness to use repeatedly before introducing paid tiers or partner inventory.
 
 ---
 
-## 1. Problem & Goal
-Time-strapped couples in Singapore spend ~30 minutes per date night juggling tabs to find a place that's open, fresh, and worth their time — often defaulting to the same five restaurants and missing the city's best pop-ups, exhibitions, and limited-run experiences.
-
-**Goal:** Compress 30 minutes of fragmented research into a 60-second decision. The planner uses the tool solo; the partner only sees a thoughtful plan land in WhatsApp.
-
-**v2 redesign focus:** the search is now **date-first**, locations are **optional**, and results split into two tabs — **Dining** and **Events** — so a date night can include "dinner first, exhibition after" without forcing the user to open another app for the activity half.
-
----
-
-## 2. Core User Flow
-
-### A. Onboarding (one-time, ~60s) — **built**
-1. **3-step multi-select quiz** (no names): (1) cuisines loved; (2) cuisines avoided + dietary hard-stops; (3) vibe defaults + budget bands. Every step has a Skip; cuisines and dietary steps support free-text fallback for items not in the chip set.
-2. Profile persists to `localStorage['gabo:profile-v2']`. UI falls back to "You" / "Partner" labels everywhere a name would appear.
-3. Last-used start points persist to `localStorage['gabo:last-starts-v1']` and pre-fill the form on return.
-4. **Shortlist** persists to `localStorage['gabo:shortlist-v1']` — array of venue IDs the user has saved while reviewing.
-
-### B. Planning (~60s) — **built**
-1. **Date-first form.** The only required field is **When**. Both starting points are **optional**; if either is blank the search runs islandwide (or single-origin if only one is provided). Special Occasion chips are optional.
-2. CTA reads **Search**. Title: "Plan a date night in Singapore."
-3. Backend filters + scores + categorises candidates. Returns up to **6 dining + 6 events**.
-4. Results page renders two **tabs** — Dining / Events — with a count badge on each. The **Times** (driving ↔ transit) toggle sits next to the tabs as part of the same cluster so the user can switch ETA mode without scanning to the opposite side of the header. List ↔ Map view toggle sits in a second cluster on the right. The results header shows the planning slot followed by the **names of the two start points** ("between Tampines MRT and Buona Vista MRT") — when only one start was given, "from {start}"; when neither, "islandwide". On the **Map** view, dining and event pins use category **glyphs** (🍽️ for dining, 🎟️ for events) on coloured circular backgrounds, so the marker category is legible at a glance without consulting the legend.
-5. **Filter chips** above the list narrow within the active tab: All / Recommended / Limited-run / Just opened / ★ Shortlist. Each filter maps to a chip predicate (see §4.4) — chip visibility on a card guarantees the card appears under the matching filter.
-6. Cards display: photo (or category-typed SVG fallback when none), **category pill** (Dining/Event) top-left, a **stack of badge chips** top-right (one chip per applicable signal — colour-matched: rose for limited-run, emerald for just-opened, amber for critic, violet for award), small **shortlist (☆/★)** and **share** (iOS-style square-with-up-arrow SVG) icon buttons; venue name, address, FairnessPill (per-card driving ↔ transit toggle, suppressed when no starts were given), a "why this for them" line that combines up to two concrete reasons drawn from the card's badge_meta (e.g. "ends 30 May · opened 3 weeks ago" or "picked by Seth Lui, DFD · michelin star 2026"), and a **CTA pair**: **Reserve** (dining) or **Get tickets** (events) + **Directions** (Google Maps). The Reserve button is **suppressed for venues that don't take reservations**, decided in this order: (1) the venue's `accepts_reservations` column when populated (true/false set by the source extractor — e.g. blog-scanner's Gemini step reading "walk-in only" / "reservations recommended" from the article); (2) a real `chope_url` → always show Reserve; (3) address contains hawker / food-court / kopitiam / coffee-shop phrases → suppress; (4) name brands itself around a hawker dish (sliced fish, bak kut teh, chicken rice, char kway teow, hokkien mee, laksa, roti prata, etc) → suppress; (5) default → show. When suppressed, **Directions** takes over as the full-width CTA but keeps the secondary (white, outlined) styling — there's no other action to compete with it, so the loud black primary would read as misplaced visual emphasis. **Source attribution** under the CTAs names the source directly — "Seth Lui" / "Daniel Food Diary" / "Miss Tam Chiak" / "Ladyironchef" / "Eatbook" / "The Smart Local" / "Esplanade" for editorial blog-sourced rows (derived from `source_url` hostname), or "Google" / "Foursquare" / "Official venue page" for API-sourced rows. The legacy "via" prefix was dropped — the source name reads cleaner on its own.
-
-Badge chips are rendered from `badge_meta`, not the single `badge` column, so a venue carrying multiple time-sensitive signals (e.g. a Michelin-starred pop-up that opened last week) shows all of them. The `badge` column still drives the ring colour and freshness score; the chip stack is the user-facing surface for label discovery.
-7. **Trending** pill rendered for venues with `trending_score ≥ 0.7` and no other badge — surfaces buzzy spots that aren't critic picks.
-8. **Highlighting**: cards with badges get a colour-coded ring matching the badge chip — closing-soon pop-ups read as time-sensitive at a glance.
-9. **Detail modal** (tap card or shortlist/share buttons) — full hours, badge meta, profile-match tag highlights, embedded **OSM mini-map** with both partners' routes drawn, **cross-recommendations** (top 3 venues from the opposite category within 6 km), category-aware Reserve/Get tickets CTA + Directions linkout.
-10. **Overview Map** (single-screen view) — all picks pinned, color-coded by category (rose dining / violet events). Tap pin → detail modal. Start points (You / Partner) render as **teardrop pin shapes** with the letter A / B inside, in distinct colours from the venue dots — so users can tell their own location apart from suggested venues at a glance.
-11. **Weather pill** — when NEA's forecast for the requested slot indicates rain *and* the rain filter actually excluded ≥ 1 outdoor venue, a sky-blue pill renders above the results: *"Hiding N outdoor spots — NEA forecast: <text>"*. Hidden on clear days or when no outdoor venues were affected; avoids cluttering sunny-day results while explaining the absence of outdoor picks (e.g. Gardens by the Bay) on rainy slots.
-
-### C. Handoff (~10s) — **built**
-1. The **share button (↗)** on any card or detail modal opens an editable textarea pre-filled with: venue name, formatted date/time, address, GrabMaps location link.
-2. No date-night branding in the default text — neutral, ready to paste into WhatsApp / iMessage.
-3. The Reserve / Get tickets CTA also routes through a confirmation sheet (BookingOverlay) and then opens the share modal automatically — for users who want to send the plan after they've reserved.
-
----
+The following sections retain engineering and operational reference material. Historical catalog counts, source availability and feature-flag snapshots are not current production attestations. Sections 1–2 govern product requirements where older descriptions conflict.
 
 ## 3. Supabase Data Schema
 
@@ -164,8 +225,8 @@ Rule of thumb: **LLM where the input is unstructured prose or the output is huma
 - Budget filter applies to **dining only** — experiences span budget_bands and aren't excluded by the user's restaurant budget preference.
 
 ### 4.2 ETA & Transit Mode
-- GrabMaps Direction (`driving`, `geometries=geojson`, `overview=full`) called for each routed candidate, once per provided start.
-- **Server always stores driving minutes**. Transit (🚆) is a UI-only client-side derivation: `simulatedMrtEta(driving) = round(driving × 1.4) + 5`. Each card has its own driving / transit toggle; default mode comes from `profile.transit_pref`.
+- OneMap drive routing is called for routed candidates and provided starting points; see §8.
+- **Server stores driving minutes for ranking**. The results UI defaults to transit and lazily requests OneMap public-transit ETAs. A simulated estimate is retained for lookup failure or missing context; see §8. Display-mode changes do not re-rank the shortlist by transit fairness.
 - `fairness_gap_min = |eta_a - eta_b|` (in driving minutes).
 - Reject any candidate with `max(eta_a, eta_b) > 60` min when ETAs are present. With no starts, the filter is a no-op.
 
@@ -320,8 +381,8 @@ The API-provider layer of §6 is currently degraded; the blog scanner is the sol
 
 ---
 
-## 7. Demo Disclosure
-No public disclosure in the app. Simulation boundary documented here.
+## 7. Data confidence
+Estimated routing, defaulted opening hours and search-fallback booking links must be understandable at the point of decision (R4–R5). Documenting them only here is insufficient. Missing provenance disclosure remains a release gap; do not claim all venues or journeys are verified.
 
 ---
 

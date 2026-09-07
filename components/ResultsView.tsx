@@ -234,19 +234,20 @@ export function ResultsView({
 
   return (
     <div className="space-y-5">
-      <header>
+      <header className="rounded-2xl border border-stone-200 bg-white/70 p-5 md:p-7">
         <button onClick={onBack} className="text-sm text-stone-500 hover:text-stone-800">
           ← New search
         </button>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+        <h1 className="gabo-display mt-3 text-3xl tracking-tight md:text-4xl">
           {totalCards === 0
             ? "Nothing fits this slot."
             : chat.length > 0
               ? "Updated for you."
-              : "Here's what we found."}
+              : "A little closer to your next date."}
         </h1>
         <p className="text-sm text-stone-500">
           {scheduledFor.toLocaleString('en-SG', {
+            timeZone: 'Asia/Singapore',
             weekday: 'long',
             day: 'numeric',
             month: 'short',

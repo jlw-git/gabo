@@ -36,6 +36,7 @@ export function PlaceSearchInput({ id, label, placeholder, value, onChange }: Pr
   const wrapperRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<number | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const editingRef = useRef(false)
 
   // Close on outside click
   useEffect(() => {
@@ -50,6 +51,10 @@ export function PlaceSearchInput({ id, label, placeholder, value, onChange }: Pr
 
   // Keep input text in sync when the caller clears the selection
   useEffect(() => {
+    if (editingRef.current && !value) {
+      editingRef.current = false
+      return
+    }
     let cancelled = false
     queueMicrotask(() => {
       if (!cancelled) setQuery(value?.label ?? '')
@@ -93,9 +98,18 @@ export function PlaceSearchInput({ id, label, placeholder, value, onChange }: Pr
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const q = e.target.value
+    // A new query must not leave the previous place selectable while debouncing.
+    abortRef.current?.abort()
+    abortRef.current = null
+    setResults([])
+    setHighlight(0)
+    setLoading(q.trim().length >= 2)
     setQuery(q)
     setOpen(true)
-    if (value) onChange(null) // user edited; invalidate previous selection
+    if (value) {
+      editingRef.current = true
+      onChange(null)
+    }
     if (debounceRef.current) window.clearTimeout(debounceRef.current)
     debounceRef.current = window.setTimeout(() => runSearch(q), DEBOUNCE_MS)
   }
@@ -107,6 +121,10 @@ export function PlaceSearchInput({ id, label, placeholder, value, onChange }: Pr
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Escape') {
+      setOpen(false)
+      return
+    }
     if (!open || results.length === 0) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -117,8 +135,6 @@ export function PlaceSearchInput({ id, label, placeholder, value, onChange }: Pr
     } else if (e.key === 'Enter') {
       e.preventDefault()
       pick(results[highlight])
-    } else if (e.key === 'Escape') {
-      setOpen(false)
     }
   }
 
@@ -132,6 +148,11 @@ export function PlaceSearchInput({ id, label, placeholder, value, onChange }: Pr
       <input
         id={id}
         type="text"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open && (loading || results.length > 0)}
+        aria-controls={`${id}-results`}
+        aria-activedescendant={open && results[highlight] ? `${id}-option-${highlight}` : undefined}
         autoComplete="off"
         inputMode="search"
         placeholder={placeholder}
@@ -139,12 +160,14 @@ export function PlaceSearchInput({ id, label, placeholder, value, onChange }: Pr
         onChange={handleChange}
         onFocus={() => setOpen(true)}
         onKeyDown={handleKeyDown}
-        className="h-11 w-full rounded-xl bg-stone-50 px-3 text-sm ring-1 ring-stone-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-300"
+        className="h-12 w-full rounded-xl bg-stone-50 px-3 text-sm ring-1 ring-stone-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand"
       />
 
       {open && (loading || results.length > 0) && (
         <ul
+          id={`${id}-results`}
           role="listbox"
+          aria-label={label || 'Matching places'}
           className="absolute left-0 right-0 z-20 mt-1 max-h-72 overflow-y-auto rounded-xl bg-white py-1 shadow-lg ring-1 ring-stone-200"
         >
           {loading && results.length === 0 && (
@@ -153,6 +176,7 @@ export function PlaceSearchInput({ id, label, placeholder, value, onChange }: Pr
           {results.map((r, i) => (
             <li
               key={r.id}
+              id={`${id}-option-${i}`}
               role="option"
               aria-selected={i === highlight}
               onMouseDown={(e) => {
