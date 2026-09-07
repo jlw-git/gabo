@@ -29,3 +29,6 @@ jobs:
       # credentials in CI — we just want to catch type drift before
       # Vercel does.
       - run: npx tsc --noEmit
+
+      # Network-isolated checks for the shared refresh budget and route triggers.
+      - run: npm run test:refresh

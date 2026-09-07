@@ -57,10 +57,14 @@ export function mapModel(model: string, provider: Provider): string {
   return model.startsWith('google/') ? model.slice('google/'.length) : model
 }
 
-function geminiClient(): GoogleGenAI {
+function geminiClient(singleAttempt = false): GoogleGenAI {
   const key = process.env.GOOGLE_GEMINI_API_KEY
   if (!key) throw new Error('GOOGLE_GEMINI_API_KEY missing')
-  return new GoogleGenAI({ apiKey: key })
+  return new GoogleGenAI({
+    apiKey: key,
+    // This SDK's retry loop reads client-level HTTP options.
+    ...(singleAttempt ? { httpOptions: { retryOptions: { attempts: 1 } } } : {}),
+  })
 }
 
 function openRouterHeaders(): Record<string, string> {
@@ -74,10 +78,11 @@ function openRouterHeaders(): Record<string, string> {
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-  ])
+  let timer: ReturnType<typeof setTimeout>
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms)
+  })
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer))
 }
 
 // ---------------------------------------------------------------------------
@@ -91,11 +96,20 @@ export type ChatCompleteOptions = {
   feature?: GeminiUsageFeature
   grounded?: boolean
   timeoutMs?: number
+  signal?: AbortSignal
+  /** One HTTP attempt, with no SDK retries. Use for metered background work. */
+  singleAttempt?: boolean
+  maxOutputTokens?: number
+  /** Gemini-only thinking token budget. */
+  thinkingBudget?: number
 }
 
 export async function chatComplete(opts: ChatCompleteOptions): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 8000
   const started = Date.now()
+  const signal = opts.signal || opts.singleAttempt
+    ? AbortSignal.any([...(opts.signal ? [opts.signal] : []), AbortSignal.timeout(timeoutMs)])
+    : undefined
   let provider: Provider = 'gemini'
   let model = opts.model
 
@@ -105,11 +119,17 @@ export async function chatComplete(opts: ChatCompleteOptions): Promise<string> {
       model = mapModel(opts.model, provider)
 
       if (provider === 'gemini') {
-        const ai = geminiClient()
+        const ai = geminiClient(opts.singleAttempt)
         const result = await ai.models.generateContent({
           model,
           contents: opts.prompt,
-          config: opts.grounded ? { tools: [{ googleSearch: {} }] } : undefined,
+          config: {
+            ...(opts.grounded ? { tools: [{ googleSearch: {} }] } : {}),
+            ...(signal ? { abortSignal: signal } : {}),
+            ...(opts.singleAttempt ? { httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } } } : {}),
+            ...(opts.maxOutputTokens !== undefined ? { maxOutputTokens: opts.maxOutputTokens } : {}),
+            ...(opts.thinkingBudget !== undefined ? { thinkingConfig: { thinkingBudget: opts.thinkingBudget } } : {}),
+          },
         })
         return (result.text ?? '').trim()
       }
@@ -118,8 +138,12 @@ export async function chatComplete(opts: ChatCompleteOptions): Promise<string> {
       const res = await fetch(OPENROUTER_URL, {
         method: 'POST',
         headers: openRouterHeaders(),
-        body: JSON.stringify({ ...orModels(model), messages: [{ role: 'user', content: opts.prompt }] }),
-        signal: AbortSignal.timeout(timeoutMs),
+        body: JSON.stringify({
+          ...orModels(model),
+          messages: [{ role: 'user', content: opts.prompt }],
+          ...(opts.maxOutputTokens !== undefined ? { max_tokens: opts.maxOutputTokens } : {}),
+        }),
+        signal: signal ?? AbortSignal.timeout(timeoutMs),
       })
       if (!res.ok) return ''
       const data = (await res.json()) as OpenAIResponse
@@ -133,7 +157,7 @@ export async function chatComplete(opts: ChatCompleteOptions): Promise<string> {
   })()
 
   const text = await withTimeout(run, timeoutMs, '')
-  await recordGeminiUsage({
+  const usageLog = recordGeminiUsage({
     feature: opts.feature,
     provider,
     model,
@@ -144,6 +168,10 @@ export async function chatComplete(opts: ChatCompleteOptions): Promise<string> {
     ok: text.length > 0,
     errorMessage: text.length > 0 ? undefined : 'empty response, timeout, or provider failure',
   })
+  // A slow log insert must not keep bounded background work alive. Aborting
+  // the client cannot undo billing for a request Google already received.
+  if (opts.singleAttempt) await withTimeout(usageLog, 2000, undefined)
+  else await usageLog
   return text
 }
 

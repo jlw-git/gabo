@@ -443,7 +443,7 @@ async function loadLastPlanMeta(): Promise<PlanMetaSnapshot | null> {
 
     const res = await fetch(`${proto}://${host}/api/plan`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-gabo-skip-catalogue-refresh': '1' },
       body: JSON.stringify(body),
       cache: 'no-store',
     })

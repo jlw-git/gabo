@@ -5,6 +5,9 @@ import {
 } from '@/lib/agents/conversation'
 import { agenticFlag } from '@/lib/agentic-flags'
 import { parsePlanRequest } from '@/lib/planner/request-validation'
+import { scheduleCatalogueRefresh } from '@/lib/catalogue/search-refresh'
+
+export const maxDuration = 300
 
 // Conversational refine endpoint (F1). The client sends the current PlanRequest
 // (the one that produced the on-screen results) plus the user's free-text
@@ -63,7 +66,9 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await runConversationTurn({ message, history, request: planReq })
-    return Response.json(result)
+    const response = Response.json(result)
+    scheduleCatalogueRefresh(request)
+    return response
   } catch (err) {
     console.error('[refine] failed', err)
     return Response.json({ error: 'refine failed' }, { status: 500 })

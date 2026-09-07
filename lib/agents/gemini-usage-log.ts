@@ -15,6 +15,7 @@ export type GeminiUsageFeature =
   | 'source-discovery'
   | 'museum-agent'
   | 'fresh-event-discovery'
+  | 'catalogue-refresh'
   | 'blog-scanner'
   | 'tsl-events'
   | 'freshness-verifier'

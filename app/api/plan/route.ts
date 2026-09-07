@@ -1,6 +1,10 @@
 import { NextRequest } from 'next/server'
 import { planDate, PlanDateError } from '@/lib/planner/plan-date'
 import { parsePlanRequest } from '@/lib/planner/request-validation'
+import { scheduleCatalogueRefresh } from '@/lib/catalogue/search-refresh'
+
+// Includes the response-time planner and the bounded after-response refresh.
+export const maxDuration = 300
 
 export async function POST(request: NextRequest) {
   let body: unknown
@@ -19,7 +23,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    return Response.json(await planDate(parsed))
+    const result = await planDate(parsed)
+    const response = Response.json(result)
+    scheduleCatalogueRefresh(request)
+    return response
   } catch (err) {
     if (err instanceof PlanDateError) {
       return Response.json({ error: err.message }, { status: err.status })
