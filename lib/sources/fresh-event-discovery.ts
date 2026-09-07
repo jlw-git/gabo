@@ -8,6 +8,7 @@
 
 import { EXTRACTION_MODEL } from '@/lib/agents/models'
 import { chatComplete } from '@/lib/agents/provider'
+import type { GeminiUsageFeature } from '@/lib/agents/gemini-usage-log'
 import { searchPlaces } from '@/lib/onemap/client'
 import type { HoursJson } from '@/lib/planner/types'
 import type { EditorialEvent } from './editorial-events'
@@ -57,7 +58,20 @@ type RawFreshEvent = {
   trend_strength: number
 }
 
-export async function discoverFreshEvents(now = new Date()): Promise<FreshEventDiscoverySummary> {
+export type FreshEventDiscoveryOptions = {
+  /** Fail closed for a refresh: malformed output or failed verification is not freshness. */
+  strict?: boolean
+  signal?: AbortSignal
+  singleAttempt?: boolean
+  feature?: GeminiUsageFeature
+  maxOutputTokens?: number
+  thinkingBudget?: number
+}
+
+export async function discoverFreshEvents(
+  now = new Date(),
+  options: FreshEventDiscoveryOptions = {}
+): Promise<FreshEventDiscoverySummary> {
   const summary: FreshEventDiscoverySummary = {
     proposed: 0,
     accepted: 0,
@@ -66,7 +80,9 @@ export async function discoverFreshEvents(now = new Date()): Promise<FreshEventD
     events: [],
   }
 
-  const raw = await proposeFreshEvents(now).catch((err) => {
+  options.signal?.throwIfAborted()
+  const raw = await proposeFreshEvents(now, options).catch((err) => {
+    if (options.strict) throw err
     summary.errors.push(`grounded discovery: ${err instanceof Error ? err.message : 'unknown'}`)
     return []
   })
@@ -74,7 +90,9 @@ export async function discoverFreshEvents(now = new Date()): Promise<FreshEventD
 
   const seen = new Set<string>()
   for (const candidate of raw.slice(0, MAX_DISCOVERED_EVENTS)) {
-    const event = await validateFreshEvent(candidate, now).catch((err) => {
+    options.signal?.throwIfAborted()
+    const event = await validateFreshEvent(candidate, now, options).catch((err) => {
+      if (options.strict) throw err
       summary.errors.push(`validate ${candidate.name || 'event'}: ${err instanceof Error ? err.message : 'unknown'}`)
       return null
     })
@@ -95,7 +113,7 @@ export async function discoverFreshEvents(now = new Date()): Promise<FreshEventD
   return summary
 }
 
-async function proposeFreshEvents(now: Date): Promise<RawFreshEvent[]> {
+async function proposeFreshEvents(now: Date, options: FreshEventDiscoveryOptions): Promise<RawFreshEvent[]> {
   const today = isoDate(now)
   const lookahead = isoDate(addDays(now, LOOKAHEAD_DAYS))
 
@@ -129,23 +147,42 @@ Rules:
 
   const text = await chatComplete({
     model: EXTRACTION_MODEL,
-    feature: 'fresh-event-discovery',
+    feature: options.feature ?? 'fresh-event-discovery',
     grounded: true,
     timeoutMs: 60_000,
+    signal: options.signal,
+    singleAttempt: options.singleAttempt,
+    maxOutputTokens: options.maxOutputTokens,
+    thinkingBudget: options.thinkingBudget,
     prompt,
   })
-  const match = text.match(/\[[\s\S]*\]/)
-  if (!match) return []
+  const json = options.strict
+    ? text.trim().replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '')
+    : text.match(/\[[\s\S]*\]/)?.[0]
+  if (!json) {
+    if (options.strict) throw new Error('Fresh-event discovery returned empty or invalid JSON')
+    return []
+  }
 
   let parsed: unknown
   try {
-    parsed = JSON.parse(match[0])
+    parsed = JSON.parse(json)
   } catch {
+    if (options.strict) throw new Error('Fresh-event discovery returned malformed JSON')
     return []
   }
-  if (!Array.isArray(parsed)) return []
+  if (!Array.isArray(parsed)) {
+    if (options.strict) throw new Error('Fresh-event discovery did not return an event array')
+    return []
+  }
 
-  return parsed.map(normalizeRawEvent).filter((e): e is RawFreshEvent => e !== null)
+  // Cap before normalisation and source/OneMap calls even if the model ignores
+  // the prompt's requested limit. A literal [] is a successful empty discovery.
+  const candidates = parsed.slice(0, MAX_DISCOVERED_EVENTS).map(normalizeRawEvent)
+  if (options.strict && candidates.some((event) => event === null)) {
+    throw new Error('Fresh-event discovery returned invalid event data')
+  }
+  return candidates.filter((event): event is RawFreshEvent => event !== null)
 }
 
 function normalizeRawEvent(value: unknown): RawFreshEvent | null {
@@ -185,7 +222,11 @@ function normalizeRawEvent(value: unknown): RawFreshEvent | null {
   }
 }
 
-async function validateFreshEvent(raw: RawFreshEvent, now: Date): Promise<EditorialEvent | null> {
+async function validateFreshEvent(
+  raw: RawFreshEvent,
+  now: Date,
+  options: FreshEventDiscoveryOptions
+): Promise<EditorialEvent | null> {
   const starts = parseSgDate(raw.starts_at, 'start')
   const ends = parseSgDate(raw.ends_at, 'end')
   if (!starts || !ends) return null
@@ -194,10 +235,10 @@ async function validateFreshEvent(raw: RawFreshEvent, now: Date): Promise<Editor
   if (ends.getTime() < starts.getTime()) return null
   if ((ends.getTime() - starts.getTime()) / 86_400_000 > MAX_RUN_DAYS) return null
 
-  const reachable = await sourceReachable(raw.source_url)
+  const reachable = await sourceReachable(raw.source_url, options)
   if (!reachable) return null
 
-  const location = await resolveLocation(raw.venue_name, raw.venue_address)
+  const location = await resolveLocation(raw.venue_name, raw.venue_address, options)
   if (!location) return null
 
   const tags = ['experience', ...raw.category_tags]
@@ -220,22 +261,29 @@ async function validateFreshEvent(raw: RawFreshEvent, now: Date): Promise<Editor
   }
 }
 
-async function sourceReachable(url: string): Promise<boolean> {
+async function sourceReachable(url: string, options: FreshEventDiscoveryOptions): Promise<boolean> {
   try {
     const res = await fetch(url, {
       method: 'GET',
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Gabo/1.0)' },
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(10_000)]),
     })
+    await res.body?.cancel()
+    if (options.strict && !res.ok && res.status !== 404 && res.status !== 410) {
+      throw new Error(`Event source verification failed (${res.status})`)
+    }
+    if (options.strict) return res.ok
     return res.ok || (res.status < 500 && res.status !== 404)
-  } catch {
+  } catch (err) {
+    if (options.strict) throw err
     return false
   }
 }
 
 async function resolveLocation(
   venueName: string,
-  venueAddress: string
+  venueAddress: string,
+  options: FreshEventDiscoveryOptions
 ): Promise<{ lat: number; lng: number; address: string } | null> {
   const queries = dedupe([
     venueAddress,
@@ -244,7 +292,14 @@ async function resolveLocation(
   ])
 
   for (const q of queries) {
-    const hits = await searchPlaces(q, 1).catch(() => [])
+    options.signal?.throwIfAborted()
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(10_000)])
+      : undefined
+    const hits = await searchPlaces(q, 1, signal).catch((err) => {
+      if (options.strict) throw err
+      return []
+    })
     const hit = hits[0]
     if (!hit) continue
     if (hit.lat < 1.15 || hit.lat > 1.48 || hit.lng < 103.6 || hit.lng > 104.1) continue

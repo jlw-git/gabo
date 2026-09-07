@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:refresh": "node --test scripts/test-search-refresh.mjs scripts/test-catalogue-refresh-worker.mjs",
+    "test:refresh:db": "node scripts/test-search-refresh-db.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.51.0",

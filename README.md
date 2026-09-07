@@ -2,6 +2,10 @@
 
 A date planner for two people in Singapore.
 
+**Current refresh policy (7 September 2026):** Scheduled catalogue jobs are paused; `vercel.json` has no cron jobs. Successful production searches return the saved catalogue and then check a shared database lock for a small background update. At most one refresh attempt runs per rolling 24 hours across all users, including failed attempts. This update discovers up to ten current events using one Gemini request; the full dining/blog/museum batches remain manual. Search-time planner AI is separate. Schedule descriptions below document the previous setup.
+
+Apply `supabase/migrations/0010_search_catalog_refresh.sql` before deploying this policy. Missing refresh state or a database error skips the update without affecting searches. `SEARCH_CATALOGUE_REFRESH_ENABLED=false` pauses search-triggered updates; development, preview deployments, and admin sample plans always skip them. Successful updates keep the catalogue fresh for 24 hours from completion. There is no timer: no searches means no updates. Inspect `catalog_refresh_state` with a service-role connection for the last outcome and next eligible attempt; dedicated AI calls are logged under `catalogue-refresh`.
+
 Gabo brings dinner and things to do into one shortlist, with personal preferences and both starting points in mind. Choose an idea, compare journeys, and prepare a suggestion to share. The planning screen requires only a date; food preferences, budget, occasions and notes are optional.
 
 The 60-second decision is a proposed usability target, not a measured guarantee. See the [product requirements and release gaps](Gabo_prd.md) for the current product contract.

@@ -50,7 +50,8 @@ export class OneMapApiError extends Error {
   }
 }
 
-async function getToken(forceRefresh = false): Promise<string> {
+async function getToken(forceRefresh = false, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted()
   const cached = tokenStore.get()
   if (!forceRefresh && cached && cached.expiresAt > Date.now() + 60_000) {
     return cached.token
@@ -68,6 +69,7 @@ async function getToken(forceRefresh = false): Promise<string> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
+    signal,
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
@@ -97,13 +99,15 @@ type SearchHit = {
   LONGITUDE?: string
 }
 
-export async function searchPlaces(query: string, limit = 8): Promise<SearchResult[]> {
+export async function searchPlaces(query: string, limit = 8, signal?: AbortSignal): Promise<SearchResult[]> {
+  signal?.throwIfAborted()
   // Search accepts unauth calls but emits a deprecation warning. Pass a token
   // if available; ignore auth errors so search still works pre-config.
   let token: string | null = null
   try {
-    token = await getToken()
+    token = await getToken(false, signal)
   } catch {
+    signal?.throwIfAborted()
     token = null
   }
 
@@ -118,6 +122,7 @@ export async function searchPlaces(query: string, limit = 8): Promise<SearchResu
 
   const res = await fetch(url.toString(), {
     headers,
+    signal,
     next: { revalidate: 60 },
   })
   if (!res.ok) throw new OneMapApiError(`OneMap search ${res.status}`, res.status)

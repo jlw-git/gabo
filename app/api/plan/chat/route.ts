@@ -2,6 +2,9 @@ import { NextRequest } from 'next/server'
 import { runIntakeTurn, type ConversationTurn } from '@/lib/agents/conversation'
 import { agenticFlag } from '@/lib/agentic-flags'
 import { parsePlanRequest, type PlanRequest } from '@/lib/planner/request-validation'
+import { scheduleCatalogueRefresh } from '@/lib/catalogue/search-refresh'
+
+export const maxDuration = 300
 
 // Chat-first intake (F1 flesh-out). Streams progress as Server-Sent Events while
 // the agent gathers the plan (date/time required, starts + prefs optional) and,
@@ -58,6 +61,7 @@ export async function POST(request: NextRequest) {
         .slice(-10)
     : []
 
+  let searchSucceeded = false
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const enc = new TextEncoder()
@@ -83,6 +87,7 @@ export async function POST(request: NextRequest) {
           buckets: result.buckets ?? null,
           meta: result.meta ?? null,
         })
+        searchSucceeded = result.planned
       } catch (err) {
         console.error('[chat] intake failed', err)
         send({
@@ -99,6 +104,7 @@ export async function POST(request: NextRequest) {
     },
   })
 
+  scheduleCatalogueRefresh(request, () => searchSucceeded)
   return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream; charset=utf-8',
